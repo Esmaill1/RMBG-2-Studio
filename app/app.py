@@ -767,4 +767,4 @@ with gr.Blocks(css=css) as demo:
         ]
     )
         
-demo.launch(share=False)
+demo.launch(share=True, allowed_paths=["../output_images"])
