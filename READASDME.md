@@ -11,6 +11,43 @@ An enhanced Pinokio app (with install files) built on [BRIA-RMBG-2.0](https://hu
 - Batch Processing: Process multiple images at once
 - URL Support: Load images directly from URLs
 
+## Standalone Usage (Without Pinokio)
+
+You can run RMBG-2-Studio without Pinokio using the included setup scripts.
+
+### Prerequisites
+- Python 3.10+ installed
+- NVIDIA GPU recommended (CUDA 12.4 support included)
+- ~8GB disk space for PyTorch and model weights
+
+### Windows
+```batch
+# First-time setup (run once)
+setup.bat
+
+# Launch the application
+run.bat
+```
+
+### Linux / macOS
+```bash
+# Make scripts executable (first time only)
+chmod +x setup.sh run.sh
+
+# First-time setup
+./setup.sh
+
+# Launch the application
+./run.sh
+```
+
+The setup script will:
+1. Create a Python virtual environment in `app/env`
+2. Install PyTorch with appropriate GPU support (auto-detected)
+3. Install all required dependencies
+
+After launching, open the URL shown in the terminal (typically `http://127.0.0.1:7860`).
+
 ## Pinokio UI: 
 Tabbed UI:  Background Removal | Composition Workspace | Batch Removal
 <p align="center">
