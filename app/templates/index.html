@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RMBG-2 Studio | إزالة الخلفية بالذكاء الاصطناعي</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- Google Fonts: Cairo -->
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="section-header">
+                <h1>ستوديو الهلال</h1>
+                <p>اداة إزالة الخلفيات .</p>
+            </header>
+
+            <div class="workspace">
+                <div class="upload-zone" id="upload-zone">
+                    <input type="file" id="file-input" accept="image/*" multiple hidden>
+                    <div class="upload-content">
+                        <i class="ph ph-cloud-arrow-up"></i>
+                        <h3>رفع الصور</h3>
+                        <p>اسحب وأفلت الملفات هنا</p>
+                        <span class="supported-formats">JPG, PNG, WEBP (بحد أقصى 50 ميجابايت)</span>
+                    </div>
+                </div>
+                
+                <div class="loading-bar-container" id="loading-bar-container" style="display: none;">
+                    <div class="loading-bar">
+                        <div class="progress" id="progress-bar"></div>
+                    </div>
+                    <span id="progress-text">جاري المعالجة...</span>
+                </div>
+
+                <div class="results-header" id="results-header" style="display: none;">
+                    <h2>الصور المعالجة</h2>
+                    <div class="results-actions">
+                        <button id="download-all-btn" class="btn btn-primary">
+                            <i class="ph ph-download-simple"></i> تحميل الكل (ZIP)
+                        </button>
+                        <button id="clear-all-btn" class="btn btn-secondary">
+                            <i class="ph ph-trash"></i> مسح الكل
+                        </button>
+                    </div>
+                </div>
+
+                <div class="results-grid" id="results-grid">
+                    <!-- Results injected here -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

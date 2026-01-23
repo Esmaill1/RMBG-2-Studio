@@ -1,0 +1,40 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Output images (don't include in repo)
+output_images/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gradio cache (legacy)
+.gradio/
+
+# Local scripts
+run_flask.bat
+run_flask.sh
+
+# Binary files (HF requires LFS for these)
+icon.png
+screenshots/
+*.png
+*.jpg
+*.jpeg
