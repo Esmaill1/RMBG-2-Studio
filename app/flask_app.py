@@ -7,6 +7,8 @@ import os
 import sys
 import uuid
 import warnings
+import threading
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from io import BytesIO
@@ -47,7 +49,7 @@ CLEANUP_INTERVAL_SECONDS = 30 * 60 # Check every 30 minutes
 def cleanup_job():
     """Background thread to clean old files"""
     import time
-    import threading
+    
     
     while True:
         try:
@@ -70,7 +72,6 @@ def cleanup_job():
         time.sleep(CLEANUP_INTERVAL_SECONDS)
 
 # Start cleanup thread
-import threading
 cleanup_thread = threading.Thread(target=cleanup_job, daemon=True)
 cleanup_thread.start()
 
@@ -259,7 +260,15 @@ if __name__ == '__main__':
     print("\n" + "="*50)
     print("  RMBG-2-Studio Flask Server")
     print("="*50)
-    print(f"  Open: http://127.0.0.1:{port}")
+    print(f"  URL: http://127.0.0.1:{port}")
+    print("  The browser will open automatically...")
     print("="*50 + "\n")
+    
+    def open_browser():
+        webbrowser.open(f"http://127.0.0.1:{port}")
+    timer = threading.Timer(2, open_browser)
+    timer.daemon = True
+    timer.start()
+    
     app.run(host='0.0.0.0', port=port, debug=False)
 

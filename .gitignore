@@ -28,10 +28,6 @@ Thumbs.db
 # Gradio cache (legacy)
 .gradio/
 
-# Local scripts
-run_flask.bat
-run_flask.sh
-
 # Binary files (HF requires LFS for these)
 icon.png
 screenshots/
