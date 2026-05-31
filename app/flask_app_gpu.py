@@ -30,10 +30,14 @@ warnings.filterwarnings('ignore', category=FutureWarning, module='timm')
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
-if os.path.exists('/app'):
-    OUTPUT_FOLDER = '/app/output_images'
-else:
-    OUTPUT_FOLDER = os.path.abspath('../output_images')
+# Output folder - allow override via environment variable
+OUTPUT_FOLDER = os.environ.get('OUTPUT_FOLDER', None)
+if OUTPUT_FOLDER is None:
+    if os.path.exists('/app'):
+        OUTPUT_FOLDER = '/app/output_images'
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        OUTPUT_FOLDER = os.path.join(os.path.dirname(script_dir), 'output_images')
 
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
@@ -78,7 +82,7 @@ if cuda_env:
 
 device = torch.device('cuda')
 gpu_name = torch.cuda.get_device_name(torch.cuda.current_device())
-gpu_mem_total = torch.cuda.get_device_properties(torch.cuda.current_device()).total_mem / (1024 ** 3)
+gpu_mem_total = torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory / (1024 ** 3)
 
 print(f"GPU: {gpu_name}")
 print(f"GPU Memory: {gpu_mem_total:.1f} GB total")

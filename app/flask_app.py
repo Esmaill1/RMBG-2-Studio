@@ -32,13 +32,14 @@ warnings.filterwarnings('ignore', category=FutureWarning, module='timm')
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload
 
-# Output folder
-# In Docker (HF Spaces), we work in /app. 
-# We should use a relative path or explicit /app/output_images that we have permissions for.
-if os.path.exists('/app'):
-    OUTPUT_FOLDER = '/app/output_images'
-else:
-    OUTPUT_FOLDER = os.path.abspath('../output_images')
+# Output folder - allow override via environment variable
+OUTPUT_FOLDER = os.environ.get('OUTPUT_FOLDER', None)
+if OUTPUT_FOLDER is None:
+    if os.path.exists('/app'):
+        OUTPUT_FOLDER = '/app/output_images'
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        OUTPUT_FOLDER = os.path.join(os.path.dirname(script_dir), 'output_images')
 
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
