@@ -1,9 +1,9 @@
 """
-Flask Web Application for RMBG-2-Studio — GPU-Optimized Version (H200/Hopper)
+Flask Web Application for RMBG-2-Studio — GPU-Optimized Version
 Background Removal and Replacement using BRIA-RMBG-2.0
-Optimized for NVIDIA H200/Hopper GPUs: torch.compile, FP8, non-blocking transfers,
-Flash Attention, warmup, increased batch size, threaded server.
-Requires CUDA GPU.
+Auto-adaptive: adjusts batch size, torch.compile, and memory management
+based on GPU VRAM. Works on any CUDA GPU from RTX 3050 (4GB) to H200 (80GB).
+Hopper-exclusive features (FP8) are disabled automatically on older GPUs.
 """
 
 import os
@@ -69,14 +69,6 @@ cleanup_thread.start()
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
-# ============== Performance Configuration ==============
-# H200 has 80GB VRAM; model is ~176MB float16, each 1024x1024 float16 tensor is ~6MB
-# 32 images = ~192MB batch tensor — trivial on 80GB
-MAX_BATCH_SIZE = int(os.environ.get('MAX_BATCH_SIZE', '32'))
-USE_TORCH_COMPILE = os.environ.get('TORCH_COMPILE', '1') == '1'
-TORCH_COMPILE_MODE = os.environ.get('TORCH_COMPILE_MODE', 'default')
-USE_FP8 = os.environ.get('FP8_INFERENCE', '0') == '1'
-
 # ============== GPU Device Setup ==============
 if not torch.cuda.is_available():
     print("ERROR: No CUDA GPU detected. This GPU-optimized version requires a CUDA-capable GPU.")
@@ -97,6 +89,36 @@ print(f"GPU: {gpu_name}")
 print(f"GPU Memory: {gpu_mem_total:.1f} GB total")
 print(f"Compute Capability: {compute_cap} ({'Hopper' if compute_cap >= 90 else 'Pre-Hopper'})")
 
+if gpu_mem_total < 4:
+    print("WARNING: GPU has less than 4GB VRAM. Performance will be limited.")
+    print("  Consider using flask_app.py (CPU version) with quantization instead.")
+
+# ============== Performance Configuration (Auto-Adaptive) ==============
+# Defaults are computed based on GPU VRAM to ensure safety on any GPU.
+# Override any setting via environment variables if you want to push limits.
+
+# Adaptive batch size: each 1024x1024 float16 image tensor is ~6MB
+#   <6GB VRAM  ->  4  (safe for 4GB laptop GPUs like RTX 3050)
+#   6-12GB     ->  8  (safe for 8GB GPUs like RTX 3050/3060/4060)
+#   12-24GB    ->  16 (safe for 12-24GB GPUs like RTX 3080/4070/4090)
+#   24+GB      ->  32 (H200/H100/A100 — trivial on 80GB)
+recommended_batch = 4 if gpu_mem_total < 6 else 8 if gpu_mem_total < 12 else 16 if gpu_mem_total < 24 else 32
+MAX_BATCH_SIZE = int(os.environ.get('MAX_BATCH_SIZE', str(recommended_batch)))
+
+# Adaptive torch.compile: skip on weak GPUs (<8GB) where the memory overhead
+# (~100-200MB) and compile time (30-60s) aren't worth the marginal speedup
+# since Python dispatch overhead is proportionally tiny on slow GPUs
+recommended_compile = '1' if gpu_mem_total >= 8 else '0'
+USE_TORCH_COMPILE = os.environ.get('TORCH_COMPILE', recommended_compile) == '1'
+TORCH_COMPILE_MODE = os.environ.get('TORCH_COMPILE_MODE', 'default')
+
+# Adaptive empty_cache: release VRAM back to CUDA pool after inference on GPUs
+# with <16GB to avoid memory pressure. On large GPUs (16+GB) keep pools warm.
+USE_EMPTY_CACHE = gpu_mem_total < 16
+
+# FP8 inference — Hopper exclusive (H200/H100), experimental
+USE_FP8 = os.environ.get('FP8_INFERENCE', '0') == '1'
+
 if USE_FP8 and compute_cap < 90:
     print("WARNING: FP8 inference requires Hopper GPU (compute capability >= 9.0).")
     print(f"  Your GPU has compute capability {compute_cap}. Disabling FP8.")
@@ -105,6 +127,12 @@ if USE_FP8 and compute_cap < 90:
 if USE_FP8:
     print("WARNING: FP8 inference is experimental and may cause quality degradation.")
     print("  FP8 uses torch.float8_e4m3fn — only supported on Hopper GPUs (H200/H100).")
+
+print(f"Auto-adaptive config for {gpu_mem_total:.1f}GB VRAM:")
+print(f"  MAX_BATCH_SIZE: {MAX_BATCH_SIZE} (recommended: {recommended_batch})")
+print(f"  torch.compile:  {'ON' if USE_TORCH_COMPILE else 'OFF'} (recommended: {'ON' if recommended_compile == '1' else 'OFF'})")
+print(f"  empty_cache:    {'ON (memory-safe)' if USE_EMPTY_CACHE else 'OFF (max throughput)'}")
+print(f"  FP8:            {'ON' if USE_FP8 else 'OFF'}")
 
 # ============== Model Loading ==============
 print("Loading BRIA-RMBG-2.0 model (float16)...")
@@ -130,9 +158,10 @@ if USE_TORCH_COMPILE:
 torch.backends.cuda.enable_flash_sdp(True)
 
 # ============== Warmup ==============
-print("Running warmup inference...")
+warmup_batch = min(MAX_BATCH_SIZE, 4)
+print(f"Running warmup inference (batch={warmup_batch})...")
 warmup_start = time.time()
-warmup_tensor = torch.randn(MAX_BATCH_SIZE, 3, 1024, 1024, dtype=torch.float16, device=device)
+warmup_tensor = torch.randn(warmup_batch, 3, 1024, 1024, dtype=torch.float16, device=device)
 with torch.inference_mode():
     autocast_dtype = torch.float8_e4m3fn if USE_FP8 else torch.float16
     with torch.autocast(device_type="cuda", dtype=autocast_dtype):
@@ -173,6 +202,8 @@ def remove_background_single(image):
     pred_pil = transforms.ToPILImage()(pred)
     mask = pred_pil.resize(image_size)
     image.putalpha(mask)
+    if USE_EMPTY_CACHE:
+        torch.cuda.empty_cache()
     return image
 
 def remove_background_batch(images):
@@ -194,6 +225,8 @@ def remove_background_batch(images):
                 preds = birefnet(batch_tensor)[-1].sigmoid().cpu()
 
         all_preds.append(preds)
+        if USE_EMPTY_CACHE:
+            torch.cuda.empty_cache()
 
     results = []
     pred_offset = 0
@@ -313,15 +346,26 @@ def serve_output(filename):
 # ============== Run Server ==============
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 7860))
+
+    if gpu_mem_total < 6:
+        gpu_tier = "Budget (<6GB)"
+    elif gpu_mem_total < 12:
+        gpu_tier = "Mid-Range (6-12GB)"
+    elif gpu_mem_total < 24:
+        gpu_tier = "High-End (12-24GB)"
+    else:
+        gpu_tier = "Datacenter (24+GB)"
+
     print("\n" + "=" * 50)
-    print("  RMBG-2-Studio GPU Server (Hopper-Optimized)")
+    print("  RMBG-2-Studio GPU Server")
     print("=" * 50)
     print(f"  GPU:            {gpu_name}")
-    print(f"  VRAM:           {gpu_mem_total:.1f} GB")
+    print(f"  VRAM:           {gpu_mem_total:.1f} GB [{gpu_tier}]")
     print(f"  Compute Cap:    {compute_cap} ({'Hopper' if compute_cap >= 90 else 'Pre-Hopper'})")
     print(f"  torch.compile:  {compile_status}")
     print(f"  FP8:            {'enabled' if USE_FP8 else 'disabled'}")
-    print(f"  MAX_BATCH_SIZE: {MAX_BATCH_SIZE}")
+    print(f"  Batch Size:     {MAX_BATCH_SIZE} (adaptive)")
+    print(f"  Empty Cache:    {'ON (memory-safe)' if USE_EMPTY_CACHE else 'OFF (max throughput)'}")
     print(f"  Warmup:         {warmup_time:.2f}s")
     print(f"  URL:            http://127.0.0.1:{port}")
     print("  The browser will open automatically...")
