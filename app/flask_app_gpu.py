@@ -183,7 +183,7 @@ NORM_MEAN = torch.tensor([0.485, 0.456, 0.406], device=device, dtype=torch.float
 NORM_STD = torch.tensor([0.229, 0.224, 0.225], device=device, dtype=torch.float32).view(1, 3, 1, 1)
 
 def preprocess_gpu(image):
-    raw = kornia.image_to_tensor(np.array(image), keepdim=False).float().to(device, non_blocking=True)
+    raw = kornia.image.image_to_tensor(np.array(image), keepdim=False).float().to(device, non_blocking=True)
     resized = kornia.geometry.transform.resize(raw, (1024, 1024), interpolation='bilinear', align_corners=False)
     normalized = (resized - NORM_MEAN) / NORM_STD
     return normalized
@@ -191,7 +191,7 @@ def preprocess_gpu(image):
 def preprocess_gpu_batch(images):
     raw_tensors = []
     for img in images:
-        raw = kornia.image_to_tensor(np.array(img), keepdim=False).float()
+        raw = kornia.image.image_to_tensor(np.array(img), keepdim=False).float()
         raw_tensors.append(raw)
     batch_raw = torch.cat(raw_tensors, dim=0).to(device, non_blocking=True)
     resized = kornia.geometry.transform.resize(batch_raw, (1024, 1024), interpolation='bilinear', align_corners=False)
