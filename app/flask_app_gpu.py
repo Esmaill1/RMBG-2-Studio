@@ -1,13 +1,15 @@
 """
-Flask Web Application for RMBG-2-Studio — GPU-Optimized Version
+Flask Web Application for RMBG-2-Studio — GPU-Optimized Version (H200/Hopper)
 Background Removal and Replacement using BRIA-RMBG-2.0
-Requires CUDA GPU. Uses half-precision, mixed-precision inference,
-and batch processing for maximum GPU throughput.
+Optimized for NVIDIA H200/Hopper GPUs: torch.compile, FP8, non-blocking transfers,
+Flash Attention, warmup, increased batch size, threaded server.
+Requires CUDA GPU.
 """
 
 import os
 import sys
 import uuid
+import time
 import warnings
 import threading
 import webbrowser
@@ -30,7 +32,6 @@ warnings.filterwarnings('ignore', category=FutureWarning, module='timm')
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
-# Output folder - allow override via environment variable
 OUTPUT_FOLDER = os.environ.get('OUTPUT_FOLDER', None)
 if OUTPUT_FOLDER is None:
     if os.path.exists('/app'):
@@ -45,7 +46,6 @@ CLEANUP_AGE_SECONDS = 3 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 30 * 60
 
 def cleanup_job():
-    import time
     while True:
         try:
             now = time.time()
@@ -68,7 +68,14 @@ cleanup_thread = threading.Thread(target=cleanup_job, daemon=True)
 cleanup_thread.start()
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
-MAX_BATCH_SIZE = 8
+
+# ============== Performance Configuration ==============
+# H200 has 80GB VRAM; model is ~176MB float16, each 1024x1024 float16 tensor is ~6MB
+# 32 images = ~192MB batch tensor — trivial on 80GB
+MAX_BATCH_SIZE = int(os.environ.get('MAX_BATCH_SIZE', '32'))
+USE_TORCH_COMPILE = os.environ.get('TORCH_COMPILE', '1') == '1'
+TORCH_COMPILE_MODE = os.environ.get('TORCH_COMPILE_MODE', 'default')
+USE_FP8 = os.environ.get('FP8_INFERENCE', '0') == '1'
 
 # ============== GPU Device Setup ==============
 if not torch.cuda.is_available():
@@ -81,11 +88,23 @@ if cuda_env:
     print(f"CUDA_VISIBLE_DEVICES set to: {cuda_env}")
 
 device = torch.device('cuda')
+gpu_props = torch.cuda.get_device_properties(torch.cuda.current_device())
 gpu_name = torch.cuda.get_device_name(torch.cuda.current_device())
-gpu_mem_total = torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory / (1024 ** 3)
+gpu_mem_total = gpu_props.total_memory / (1024 ** 3)
+compute_cap = gpu_props.major * 10 + gpu_props.minor
 
 print(f"GPU: {gpu_name}")
 print(f"GPU Memory: {gpu_mem_total:.1f} GB total")
+print(f"Compute Capability: {compute_cap} ({'Hopper' if compute_cap >= 90 else 'Pre-Hopper'})")
+
+if USE_FP8 and compute_cap < 90:
+    print("WARNING: FP8 inference requires Hopper GPU (compute capability >= 9.0).")
+    print(f"  Your GPU has compute capability {compute_cap}. Disabling FP8.")
+    USE_FP8 = False
+
+if USE_FP8:
+    print("WARNING: FP8 inference is experimental and may cause quality degradation.")
+    print("  FP8 uses torch.float8_e4m3fn — only supported on Hopper GPUs (H200/H100).")
 
 # ============== Model Loading ==============
 print("Loading BRIA-RMBG-2.0 model (float16)...")
@@ -95,6 +114,33 @@ birefnet = AutoModelForImageSegmentation.from_pretrained(
 )
 birefnet = birefnet.to(device)
 birefnet.eval()
+
+# ============== torch.compile ==============
+compile_status = "disabled"
+if USE_TORCH_COMPILE:
+    try:
+        birefnet = torch.compile(birefnet, mode=TORCH_COMPILE_MODE)
+        compile_status = f"enabled (mode={TORCH_COMPILE_MODE})"
+        print(f"torch.compile() {compile_status}")
+    except Exception as e:
+        compile_status = f"failed: {e}"
+        print(f"torch.compile() {compile_status}")
+
+# ============== Flash Attention ==============
+torch.backends.cuda.enable_flash_sdp(True)
+
+# ============== Warmup ==============
+print("Running warmup inference...")
+warmup_start = time.time()
+warmup_tensor = torch.randn(MAX_BATCH_SIZE, 3, 1024, 1024, dtype=torch.float16, device=device)
+with torch.inference_mode():
+    autocast_dtype = torch.float8_e4m3fn if USE_FP8 else torch.float16
+    with torch.autocast(device_type="cuda", dtype=autocast_dtype):
+        _ = birefnet(warmup_tensor)[-1].sigmoid().cpu()
+del warmup_tensor
+torch.cuda.synchronize()
+warmup_time = time.time() - warmup_start
+print(f"Warmup complete in {warmup_time:.2f}s")
 
 gpu_mem_allocated = torch.cuda.memory_allocated() / (1024 ** 3)
 gpu_mem_reserved = torch.cuda.memory_reserved() / (1024 ** 3)
@@ -118,15 +164,15 @@ def generate_filename(prefix="no_bg"):
 
 def remove_background_single(image):
     image_size = image.size
-    input_tensor = transform_image(image).unsqueeze(0).to(device)
+    input_tensor = transform_image(image).unsqueeze(0).to(device, non_blocking=True)
+    autocast_dtype = torch.float8_e4m3fn if USE_FP8 else torch.float16
     with torch.inference_mode():
-        with torch.cuda.amp.autocast():
+        with torch.autocast(device_type="cuda", dtype=autocast_dtype):
             preds = birefnet(input_tensor)[-1].sigmoid().cpu()
     pred = preds[0].squeeze()
     pred_pil = transforms.ToPILImage()(pred)
     mask = pred_pil.resize(image_size)
     image.putalpha(mask)
-    torch.cuda.empty_cache()
     return image
 
 def remove_background_batch(images):
@@ -134,23 +180,20 @@ def remove_background_batch(images):
         return [remove_background_single(images[0])]
 
     original_sizes = [img.size for img in images]
-    tensors = []
-    for img in images:
-        t = transform_image(img)
-        tensors.append(t)
+    tensors = [transform_image(img) for img in images]
 
+    autocast_dtype = torch.float8_e4m3fn if USE_FP8 else torch.float16
     all_preds = []
     for chunk_start in range(0, len(tensors), MAX_BATCH_SIZE):
         chunk_end = min(chunk_start + MAX_BATCH_SIZE, len(tensors))
         chunk_tensors = tensors[chunk_start:chunk_end]
-        batch_tensor = torch.stack(chunk_tensors).to(device)
+        batch_tensor = torch.stack(chunk_tensors).to(device, non_blocking=True)
 
         with torch.inference_mode():
-            with torch.cuda.amp.autocast():
+            with torch.autocast(device_type="cuda", dtype=autocast_dtype):
                 preds = birefnet(batch_tensor)[-1].sigmoid().cpu()
 
         all_preds.append(preds)
-        torch.cuda.empty_cache()
 
     results = []
     pred_offset = 0
@@ -271,11 +314,16 @@ def serve_output(filename):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 7860))
     print("\n" + "=" * 50)
-    print("  RMBG-2-Studio GPU Server")
+    print("  RMBG-2-Studio GPU Server (Hopper-Optimized)")
     print("=" * 50)
-    print(f"  GPU:  {gpu_name}")
-    print(f"  VRAM: {gpu_mem_total:.1f} GB")
-    print(f"  URL:  http://127.0.0.1:{port}")
+    print(f"  GPU:            {gpu_name}")
+    print(f"  VRAM:           {gpu_mem_total:.1f} GB")
+    print(f"  Compute Cap:    {compute_cap} ({'Hopper' if compute_cap >= 90 else 'Pre-Hopper'})")
+    print(f"  torch.compile:  {compile_status}")
+    print(f"  FP8:            {'enabled' if USE_FP8 else 'disabled'}")
+    print(f"  MAX_BATCH_SIZE: {MAX_BATCH_SIZE}")
+    print(f"  Warmup:         {warmup_time:.2f}s")
+    print(f"  URL:            http://127.0.0.1:{port}")
     print("  The browser will open automatically...")
     print("=" * 50 + "\n")
 
@@ -284,4 +332,4 @@ if __name__ == '__main__':
     timer = threading.Timer(2, open_browser)
     timer.daemon = True
     timer.start()
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
