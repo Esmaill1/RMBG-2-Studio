@@ -33,48 +33,45 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleUpload(files) {
         if (files.length === 0) return;
 
+        const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+        if (imageFiles.length === 0) {
+            showToast('لا توجد صور صالحة للمعالجة', 'error');
+            return;
+        }
+
         loadingContainer.style.display = 'flex';
-        progressBar.style.width = '0%';
+        progressBar.style.width = '5%';
         resultsHeader.style.display = 'flex';
-        
-        let processedCount = 0;
-        const totalFiles = files.length;
-        
-        for (let i = 0; i < totalFiles; i++) {
-            const file = files[i];
-            
-            if (!file.type.startsWith('image/')) continue;
-            
-            progressText.textContent = `جاري المعالجة ${i + 1}/${totalFiles}: ${file.name}`;
-            
-            const formData = new FormData();
-            formData.append('images', file);
+        progressText.textContent = `جاري المعالجة ${imageFiles.length} صورة في دفعة واحدة...`;
 
-            try {
-                const response = await fetch('/api/remove-bg', {
-                    method: 'POST',
-                    body: formData
-                });
-                const data = await response.json();
+        const formData = new FormData();
+        imageFiles.forEach(file => formData.append('images', file));
 
-                if (data.success && data.results) {
-                    data.results.forEach(result => createResultCard(result));
-                }
-            } catch (error) {
-                console.error(`Error processing ${file.name}:`, error);
-                showToast(`فشل معالجة ${file.name}`, 'error');
+        try {
+            progressBar.style.width = '20%';
+            const response = await fetch('/api/remove-bg', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+
+            if (data.success && data.results) {
+                progressBar.style.width = '90%';
+                data.results.forEach(result => createResultCard(result));
+                progressBar.style.width = '100%';
+                showToast(`تمت معالجة ${data.results.length} صورة!`);
+            } else if (data.error) {
+                showToast(data.error, 'error');
             }
-
-            processedCount++;
-            const percent = (processedCount / totalFiles) * 100;
-            progressBar.style.width = `${percent}%`;
+        } catch (error) {
+            console.error('Batch processing error:', error);
+            showToast('فشل معالجة الصور', 'error');
         }
 
         progressText.textContent = 'اكتملت المعالجة!';
         setTimeout(() => {
-             loadingContainer.style.display = 'none';
+            loadingContainer.style.display = 'none';
         }, 1500);
-        showToast(`تمت معالجة ${processedCount} صورة!`);
     }
 
     function createResultCard(result) {

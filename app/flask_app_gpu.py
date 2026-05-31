@@ -3,6 +3,8 @@ Flask Web Application for RMBG-2-Studio — GPU-Optimized Version
 Background Removal and Replacement using BRIA-RMBG-2.0
 Auto-adaptive: adjusts batch size, torch.compile, and memory management
 based on GPU VRAM. Works on any CUDA GPU from RTX 3050 (4GB) to H200 (80GB).
+GPU-accelerated preprocessing with kornia, pipeline parallelism,
+PNG fast save (compress_level=1), batched frontend support.
 Hopper-exclusive features (FP8) are disabled automatically on older GPUs.
 """
 
@@ -16,12 +18,13 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor
 
 import torch
 import numpy as np
+import kornia
 from PIL import Image, ImageEnhance
 from flask import Flask, request, jsonify, send_from_directory, render_template, send_file
-from torchvision import transforms
 from werkzeug.utils import secure_filename
 import zipfile
 
@@ -30,7 +33,7 @@ from transformers import AutoModelForImageSegmentation
 warnings.filterwarnings('ignore', category=FutureWarning, module='timm')
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
 
 OUTPUT_FOLDER = os.environ.get('OUTPUT_FOLDER', None)
 if OUTPUT_FOLDER is None:
@@ -94,31 +97,19 @@ if gpu_mem_total < 4:
     print("  Consider using flask_app.py (CPU version) with quantization instead.")
 
 # ============== Performance Configuration (Auto-Adaptive) ==============
-# Defaults are computed based on GPU VRAM to ensure safety on any GPU.
 # Override any setting via environment variables if you want to push limits.
 
-# Adaptive batch size: each 1024x1024 float16 image tensor is ~6MB
-#   <6GB VRAM  ->  4  (safe for 4GB laptop GPUs like RTX 3050)
-#   6-12GB     ->  8  (safe for 8GB GPUs like RTX 3050/3060/4060)
-#   12-24GB    ->  16 (safe for 12-24GB GPUs like RTX 3080/4070/4090)
-#   24+GB      ->  32 (H200/H100/A100 — trivial on 80GB)
-recommended_batch = 4 if gpu_mem_total < 6 else 8 if gpu_mem_total < 12 else 16 if gpu_mem_total < 24 else 32
+recommended_batch = 4 if gpu_mem_total < 6 else 8 if gpu_mem_total < 12 else \
+                    16 if gpu_mem_total < 24 else 32 if gpu_mem_total < 48 else \
+                    64 if gpu_mem_total < 96 else 128
 MAX_BATCH_SIZE = int(os.environ.get('MAX_BATCH_SIZE', str(recommended_batch)))
 
-# Adaptive torch.compile: disabled by default because JIT compilation takes
-# 5-15 minutes on first run with no progress indicator. The speedup (1.5-2x)
-# is only amortized after processing hundreds of images. For a web app that
-# processes a few images per request, the startup delay is worse than slightly
-# slower per-image inference. Enable via TORCH_COMPILE=1 if you want max speed.
-recommended_compile = '0'
+recommended_compile = '1' if gpu_mem_total >= 24 else '0'
 USE_TORCH_COMPILE = os.environ.get('TORCH_COMPILE', recommended_compile) == '1'
 TORCH_COMPILE_MODE = os.environ.get('TORCH_COMPILE_MODE', 'default')
 
-# Adaptive empty_cache: release VRAM back to CUDA pool after inference on GPUs
-# with <16GB to avoid memory pressure. On large GPUs (16+GB) keep pools warm.
 USE_EMPTY_CACHE = gpu_mem_total < 16
 
-# FP8 inference — Hopper exclusive (H200/H100), experimental
 USE_FP8 = os.environ.get('FP8_INFERENCE', '0') == '1'
 
 if USE_FP8 and compute_cap < 90:
@@ -152,7 +143,6 @@ if USE_TORCH_COMPILE:
     print("  WARNING: torch.compile() is enabled")
     print("  JIT compilation takes 5-15 minutes on first run.")
     print("  The app will appear stuck during warmup — this is normal.")
-    print("  Speedup is only worthwhile for high-volume processing.")
     print("  To disable: set TORCH_COMPILE=0")
     print("=" * 50)
     try:
@@ -188,11 +178,32 @@ gpu_mem_reserved = torch.cuda.memory_reserved() / (1024 ** 3)
 print(f"Model loaded on {device} ({gpu_name})")
 print(f"GPU Memory: {gpu_mem_allocated:.2f} GB allocated, {gpu_mem_reserved:.2f} GB reserved")
 
-transform_image = transforms.Compose([
-    transforms.Resize((1024, 1024)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-])
+# ============== GPU Preprocessing (kornia) ==============
+NORM_MEAN = torch.tensor([0.485, 0.456, 0.406], device=device, dtype=torch.float32).view(1, 3, 1, 1)
+NORM_STD = torch.tensor([0.229, 0.224, 0.225], device=device, dtype=torch.float32).view(1, 3, 1, 1)
+
+def preprocess_gpu(image):
+    raw = kornia.image_to_tensor(np.array(image), keepdim=False).float().to(device, non_blocking=True)
+    resized = kornia.geometry.transform.resize(raw, (1024, 1024), interpolation='bilinear', align_corners=False)
+    normalized = (resized - NORM_MEAN) / NORM_STD
+    return normalized
+
+def preprocess_gpu_batch(images):
+    raw_tensors = []
+    for img in images:
+        raw = kornia.image_to_tensor(np.array(img), keepdim=False).float()
+        raw_tensors.append(raw)
+    batch_raw = torch.cat(raw_tensors, dim=0).to(device, non_blocking=True)
+    resized = kornia.geometry.transform.resize(batch_raw, (1024, 1024), interpolation='bilinear', align_corners=False)
+    normalized = (resized - NORM_MEAN) / NORM_STD
+    return normalized
+
+# ============== Pipeline Parallelism ==============
+save_executor = ThreadPoolExecutor(max_workers=4)
+
+def save_result_async(processed, output_path):
+    processed.save(output_path, 'PNG', compress_level=1)
+    return output_path
 
 # ============== Utility Functions ==============
 def allowed_file(filename):
@@ -205,14 +216,13 @@ def generate_filename(prefix="no_bg"):
 
 def remove_background_single(image):
     image_size = image.size
-    input_tensor = transform_image(image).unsqueeze(0).to(device, non_blocking=True)
+    input_tensor = preprocess_gpu(image)
     autocast_dtype = torch.float8_e4m3fn if USE_FP8 else torch.float16
     with torch.inference_mode():
         with torch.autocast(device_type="cuda", dtype=autocast_dtype):
             preds = birefnet(input_tensor)[-1].sigmoid().cpu()
     pred = preds[0].squeeze()
-    pred_pil = transforms.ToPILImage()(pred)
-    mask = pred_pil.resize(image_size)
+    mask = Image.fromarray((pred.numpy() * 255).astype(np.uint8)).resize(image_size)
     image.putalpha(mask)
     if USE_EMPTY_CACHE:
         torch.cuda.empty_cache()
@@ -223,14 +233,13 @@ def remove_background_batch(images):
         return [remove_background_single(images[0])]
 
     original_sizes = [img.size for img in images]
-    tensors = [transform_image(img) for img in images]
 
     autocast_dtype = torch.float8_e4m3fn if USE_FP8 else torch.float16
     all_preds = []
-    for chunk_start in range(0, len(tensors), MAX_BATCH_SIZE):
-        chunk_end = min(chunk_start + MAX_BATCH_SIZE, len(tensors))
-        chunk_tensors = tensors[chunk_start:chunk_end]
-        batch_tensor = torch.stack(chunk_tensors).to(device, non_blocking=True)
+    for chunk_start in range(0, len(images), MAX_BATCH_SIZE):
+        chunk_end = min(chunk_start + MAX_BATCH_SIZE, len(images))
+        chunk_images = images[chunk_start:chunk_end]
+        batch_tensor = preprocess_gpu_batch(chunk_images)
 
         with torch.inference_mode():
             with torch.autocast(device_type="cuda", dtype=autocast_dtype):
@@ -246,8 +255,7 @@ def remove_background_batch(images):
         for i in range(chunk_preds.shape[0]):
             global_idx = pred_offset + i
             pred = chunk_preds[i].squeeze()
-            pred_pil = transforms.ToPILImage()(pred)
-            mask = pred_pil.resize(original_sizes[global_idx])
+            mask = Image.fromarray((pred.numpy() * 255).astype(np.uint8)).resize(original_sizes[global_idx])
             result_img = images[global_idx].copy()
             result_img.putalpha(mask)
             results.append(result_img)
@@ -294,6 +302,7 @@ def api_remove_bg():
         torch.cuda.empty_cache()
         return jsonify({'error': 'Inference failed'}), 500
 
+    save_futures = []
     results = []
     for i, processed in enumerate(processed_images):
         original_base = file_info[i]['original_base']
@@ -303,12 +312,15 @@ def api_remove_bg():
             filename = f"{original_base}_{counter}.png"
             counter += 1
         output_path = os.path.join(OUTPUT_FOLDER, filename)
-        processed.save(output_path, 'PNG')
+        save_futures.append(save_executor.submit(save_result_async, processed, output_path))
         results.append({
             'filename': filename,
             'url': f'/output/{filename}',
             'original_name': file_info[i]['original_name']
         })
+
+    for future in save_futures:
+        future.result()
 
     return jsonify({'success': True, 'results': results})
 
@@ -378,6 +390,8 @@ if __name__ == '__main__':
     print(f"  FP8:            {'enabled' if USE_FP8 else 'disabled'}")
     print(f"  Batch Size:     {MAX_BATCH_SIZE} (adaptive)")
     print(f"  Empty Cache:    {'ON (memory-safe)' if USE_EMPTY_CACHE else 'OFF (max throughput)'}")
+    print(f"  Preprocessing:  kornia (GPU)")
+    print(f"  PNG Save:       compress_level=1 (fast)")
     print(f"  Warmup:         {warmup_time:.2f}s")
     print(f"  URL:            http://127.0.0.1:{port}")
     print("  The browser will open automatically...")
