@@ -1,3 +1,5 @@
+# Dockerfile for CPU-only deployment
+# For GPU deployment, use Dockerfile.gpu instead
 FROM python:3.10-slim
 
 # System dependencies
@@ -13,6 +15,7 @@ WORKDIR /app
 # Copy requirements first for caching
 COPY app/requirements.txt requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
+    # Install CPU-only PyTorch from the CPU-specific index
     pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 

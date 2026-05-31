@@ -1,0 +1,37 @@
+# ============================================================
+# RMBG-2-Studio GPU (CUDA) Requirements
+# ============================================================
+# This file is for systems with NVIDIA GPUs and CUDA support.
+# torch and torchvision pip packages include CUDA support by default.
+#
+# Requirements:
+#   - NVIDIA GPU with CUDA support
+#   - CUDA 12.x recommended (torch 2.x ships with CUDA 12.x)
+#   - NVIDIA drivers compatible with CUDA 12.x
+#
+# Install command:
+#   pip install -r requirements-gpu.txt
+# ============================================================
+
+# Core ML
+torch
+torchvision
+transformers>=4.39.1,<4.50.0
+timm
+kornia
+devicetorch  # auto-detects CUDA/CPU/MPS — will use CUDA when available
+
+# Image processing
+pillow
+opencv-python-headless
+numpy
+scikit-image
+
+# Web framework
+flask>=3.0.0
+werkzeug
+
+# Utilities
+fsspec
+huggingface-hub
+pydantic

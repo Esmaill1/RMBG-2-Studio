@@ -1,0 +1,52 @@
+# GPU-enabled Dockerfile for RMBG-2-Studio
+# Uses NVIDIA CUDA 12.4 runtime for GPU-accelerated inference
+
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+
+# Install Python 3.10 and system dependencies
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y \
+        python3.10 \
+        python3.10-venv \
+        python3.10-dev \
+        python3-pip \
+        libgl1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set python3.10 as default python
+RUN ln -sf /usr/bin/python3.10 /usr/bin/python && \
+    ln -sf /usr/bin/python3.10 /usr/bin/python3
+
+# Upgrade pip
+RUN python3.10 -m pip install --no-cache-dir --upgrade pip
+
+# Create app user and directory
+RUN useradd -m -u 1000 user
+WORKDIR /app
+
+# Copy requirements first for caching
+COPY app/requirements-gpu.txt requirements-gpu.txt
+RUN pip install --no-cache-dir torch torchvision && \
+    pip install --no-cache-dir -r requirements-gpu.txt
+
+# Copy application code
+COPY app/ .
+
+# Create output directory
+RUN mkdir -p /app/output_images && chown -R user:user /app
+
+# Environment variable for GPU selection
+ENV CUDA_VISIBLE_DEVICES=0
+
+# Switch to non-root user
+USER user
+
+# Expose port
+EXPOSE 7860
+
+# Run the GPU-enabled app
+CMD ["python", "flask_app_gpu.py"]
