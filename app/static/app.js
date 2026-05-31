@@ -1,5 +1,4 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // ================= REMOVE BACKGROUND LOGIC =================
     const uploadZone = document.getElementById('upload-zone');
     const fileInput = document.getElementById('file-input');
     const resultsGrid = document.getElementById('results-grid');
@@ -11,22 +10,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const downloadAllBtn = document.getElementById('download-all-btn');
     const clearAllBtn = document.getElementById('clear-all-btn');
 
-    // Drag & Drop
     uploadZone.addEventListener('click', () => fileInput.click());
     uploadZone.addEventListener('dragover', (e) => {
         e.preventDefault();
-        uploadZone.style.borderColor = 'var(--primary)';
-        uploadZone.style.backgroundColor = '#f8fbff';
+        uploadZone.classList.add('drag-over');
     });
     uploadZone.addEventListener('dragleave', (e) => {
         e.preventDefault();
-        uploadZone.style.borderColor = 'var(--border)';
-        uploadZone.style.backgroundColor = '#ffffff';
+        uploadZone.classList.remove('drag-over');
     });
     uploadZone.addEventListener('drop', (e) => {
         e.preventDefault();
-        uploadZone.style.borderColor = 'var(--border)';
-        uploadZone.style.backgroundColor = '#ffffff';
+        uploadZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length) {
             handleUpload(e.dataTransfer.files);
         }
@@ -38,7 +33,6 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleUpload(files) {
         if (files.length === 0) return;
 
-        // UI Setup
         loadingContainer.style.display = 'flex';
         progressBar.style.width = '0%';
         resultsHeader.style.display = 'flex';
@@ -46,17 +40,15 @@ document.addEventListener('DOMContentLoaded', () => {
         let processedCount = 0;
         const totalFiles = files.length;
         
-        // Process sequentially for accurate progress
         for (let i = 0; i < totalFiles; i++) {
             const file = files[i];
             
-            // Skip non-images
             if (!file.type.startsWith('image/')) continue;
             
             progressText.textContent = `جاري المعالجة ${i + 1}/${totalFiles}: ${file.name}`;
             
             const formData = new FormData();
-            formData.append('images', file); // API expects list but we act like size 1 batch
+            formData.append('images', file);
 
             try {
                 const response = await fetch('/api/remove-bg', {
@@ -73,7 +65,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast(`فشل معالجة ${file.name}`, 'error');
             }
 
-            // Update Progress
             processedCount++;
             const percent = (processedCount / totalFiles) * 100;
             progressBar.style.width = `${percent}%`;
@@ -88,8 +79,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function createResultCard(result) {
         const card = document.createElement('div');
-        card.className = 'result-card';
-        card.dataset.filename = result.filename; // Store for zip download logic
+        card.className = 'result-card card-enter';
+        card.dataset.filename = result.filename;
         card.innerHTML = `
             <div class="result-image-wrapper">
                 <img src="${result.url}" alt="${result.original_name}">
@@ -105,13 +96,16 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
         
-        // Add delete logic
         card.querySelector('.delete-btn').addEventListener('click', () => {
-            card.remove();
-            checkEmptyGrid();
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.9)';
+            setTimeout(() => {
+                card.remove();
+                checkEmptyGrid();
+            }, 300);
         });
         
-        resultsGrid.prepend(card); // Newest first
+        resultsGrid.prepend(card);
     }
 
     function checkEmptyGrid() {
@@ -120,7 +114,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Clear All Logic
     clearAllBtn.addEventListener('click', async () => {
         if(confirm('هل أنت متأكد من مسح جميع الصور المعالجة؟ (سيتم حذفها من الخادم أيضاً)')) {
             try {
@@ -141,7 +134,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Download All Logic
     downloadAllBtn.addEventListener('click', async () => {
         const cards = document.querySelectorAll('.result-card');
         if (cards.length === 0) return;
@@ -181,12 +173,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // ================= TOAST UI =================
     function showToast(message, type = 'success') {
         const toast = document.getElementById('toast');
         toast.textContent = message;
-        toast.style.backgroundColor = type === 'error' ? '#d0342c' : '#0969da';
+        toast.className = 'toast';
+        toast.classList.add(type === 'error' ? 'toast-error' : 'toast-success');
         toast.classList.add('show');
-        setTimeout(() => toast.classList.remove('show'), 3000);
+        setTimeout(() => {
+            toast.classList.remove('show');
+        }, 3000);
     }
 });
