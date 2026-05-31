@@ -105,10 +105,12 @@ if gpu_mem_total < 4:
 recommended_batch = 4 if gpu_mem_total < 6 else 8 if gpu_mem_total < 12 else 16 if gpu_mem_total < 24 else 32
 MAX_BATCH_SIZE = int(os.environ.get('MAX_BATCH_SIZE', str(recommended_batch)))
 
-# Adaptive torch.compile: skip on weak GPUs (<8GB) where the memory overhead
-# (~100-200MB) and compile time (30-60s) aren't worth the marginal speedup
-# since Python dispatch overhead is proportionally tiny on slow GPUs
-recommended_compile = '1' if gpu_mem_total >= 8 else '0'
+# Adaptive torch.compile: disabled by default because JIT compilation takes
+# 5-15 minutes on first run with no progress indicator. The speedup (1.5-2x)
+# is only amortized after processing hundreds of images. For a web app that
+# processes a few images per request, the startup delay is worse than slightly
+# slower per-image inference. Enable via TORCH_COMPILE=1 if you want max speed.
+recommended_compile = '0'
 USE_TORCH_COMPILE = os.environ.get('TORCH_COMPILE', recommended_compile) == '1'
 TORCH_COMPILE_MODE = os.environ.get('TORCH_COMPILE_MODE', 'default')
 
@@ -146,6 +148,13 @@ birefnet.eval()
 # ============== torch.compile ==============
 compile_status = "disabled"
 if USE_TORCH_COMPILE:
+    print("=" * 50)
+    print("  WARNING: torch.compile() is enabled")
+    print("  JIT compilation takes 5-15 minutes on first run.")
+    print("  The app will appear stuck during warmup — this is normal.")
+    print("  Speedup is only worthwhile for high-volume processing.")
+    print("  To disable: set TORCH_COMPILE=0")
+    print("=" * 50)
     try:
         birefnet = torch.compile(birefnet, mode=TORCH_COMPILE_MODE)
         compile_status = f"enabled (mode={TORCH_COMPILE_MODE})"
@@ -159,7 +168,10 @@ torch.backends.cuda.enable_flash_sdp(True)
 
 # ============== Warmup ==============
 warmup_batch = min(MAX_BATCH_SIZE, 4)
-print(f"Running warmup inference (batch={warmup_batch})...")
+warmup_msg = f"Running warmup inference (batch={warmup_batch})"
+if USE_TORCH_COMPILE and compile_status.startswith("enabled"):
+    warmup_msg += " — includes torch.compile JIT (expect 5-15 min delay)"
+print(warmup_msg + "...")
 warmup_start = time.time()
 warmup_tensor = torch.randn(warmup_batch, 3, 1024, 1024, dtype=torch.float16, device=device)
 with torch.inference_mode():
