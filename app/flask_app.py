@@ -12,12 +12,13 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 from io import BytesIO
+import json
 
 # Third-party imports
 import torch
 import numpy as np
 from PIL import Image, ImageEnhance
-from flask import Flask, request, jsonify, send_from_directory, render_template, send_file
+from flask import Flask, request, jsonify, send_from_directory, render_template, send_file, Response
 from torchvision import transforms
 from werkzeug.utils import secure_filename
 
@@ -159,51 +160,61 @@ def index():
 
 @app.route('/api/remove-bg', methods=['POST'])
 def api_remove_bg():
-    """API endpoint to remove background from uploaded images (Sequential Processing)"""
+    """API endpoint to remove background from uploaded images (SSE Streaming)"""
     if 'images' not in request.files:
         return jsonify({'error': 'No image files provided'}), 400
-    
+
     files = request.files.getlist('images')
     if not files:
         return jsonify({'error': 'No files selected'}), 400
-    
-    results = []
-    
+
+    file_data = []
     for file in files:
         if file.filename == '' or not allowed_file(file.filename):
             continue
-            
-        try:
-            # Load and process image
-            image = Image.open(file.stream).convert('RGB')
-            processed = remove_background(image)
-            
-            # Save result
-            original_base = os.path.splitext(secure_filename(file.filename))[0]
-            filename = f"{original_base}.png"
-            
-            # Handle duplicates
-            counter = 1
-            while os.path.exists(os.path.join(OUTPUT_FOLDER, filename)):
-                filename = f"{original_base}_{counter}.png"
-                counter += 1
-                
-            output_path = os.path.join(OUTPUT_FOLDER, filename)
-            processed.save(output_path, 'PNG')
-            
-            results.append({
-                'filename': filename,
-                'url': f'/output/{filename}',
-                'original_name': file.filename
-            })
-        except Exception as e:
-            print(f"Error processing {file.filename}: {e}")
-            # Continue processing — displaying errors isn't helpful for partial results
-            
-    return jsonify({
-        'success': True,
-        'results': results
-    })
+        file_bytes = BytesIO()
+        file.stream.save(file_bytes)
+        file_bytes.seek(0)
+        file_data.append({'filename': file.filename, 'bytes': file_bytes})
+
+    def generate():
+        success_count = 0
+        total = len(file_data)
+
+        for entry in file_data:
+            original_name = entry['filename']
+            try:
+                image = Image.open(entry['bytes']).convert('RGB')
+                processed = remove_background(image)
+
+                original_base = os.path.splitext(secure_filename(original_name))[0]
+                filename = f"{original_base}.png"
+
+                counter = 1
+                while os.path.exists(os.path.join(OUTPUT_FOLDER, filename)):
+                    filename = f"{original_base}_{counter}.png"
+                    counter += 1
+
+                output_path = os.path.join(OUTPUT_FOLDER, filename)
+                processed.save(output_path, 'PNG')
+
+                success_count += 1
+                yield f"data: {json.dumps({'filename': filename, 'url': f'/output/{filename}', 'original_name': original_name})}\n\n"
+            except Exception as e:
+                print(f"Error processing {original_name}: {e}")
+                yield f"data: {json.dumps({'error': str(e), 'original_name': original_name})}\n\n"
+
+        yield f"data: {json.dumps({'done': True, 'total': total, 'success_count': success_count})}\n\n"
+
+    return Response(
+        generate(),
+        content_type='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive'
+        }
+    )
 
 
 import zipfile

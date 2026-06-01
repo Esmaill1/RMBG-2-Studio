@@ -42,10 +42,13 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingContainer.style.display = 'flex';
         progressBar.style.width = '5%';
         resultsHeader.style.display = 'flex';
-        progressText.textContent = `جاري المعالجة ${imageFiles.length} صورة واحدة تلو الأخرى...`;
+        progressText.textContent = `جاري المعالجة... (0/${imageFiles.length})`;
 
         const formData = new FormData();
         imageFiles.forEach(file => formData.append('images', file));
+
+        let processedCount = 0;
+        const totalCount = imageFiles.length;
 
         try {
             progressBar.style.width = '20%';
@@ -53,18 +56,69 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 body: formData
             });
-            const data = await response.json();
 
-            if (data.success && data.results) {
-                progressBar.style.width = '90%';
-                data.results.forEach(result => createResultCard(result));
-                progressBar.style.width = '100%';
-                showToast(`تمت معالجة ${data.results.length} صورة!`);
-            } else if (data.error) {
-                showToast(data.error, 'error');
+            if (response.status === 400) {
+                const data = await response.json();
+                showToast(data.error || 'خطأ في الطلب', 'error');
+                progressText.textContent = 'اكتملت المعالجة!';
+                setTimeout(() => {
+                    loadingContainer.style.display = 'none';
+                }, 1500);
+                return;
+            }
+
+            if (!response.ok) {
+                showToast('فشل معالجة الصور', 'error');
+                progressText.textContent = 'اكتملت المعالجة!';
+                setTimeout(() => {
+                    loadingContainer.style.display = 'none';
+                }, 1500);
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                let boundaryIndex;
+                while ((boundaryIndex = buffer.indexOf('\n\n')) !== -1) {
+                    const eventText = buffer.substring(0, boundaryIndex);
+                    buffer = buffer.substring(boundaryIndex + 2);
+
+                    const dataLines = eventText.split('\n').filter(line => line.startsWith('data:'));
+                    for (const line of dataLines) {
+                        const jsonStr = line.substring(5).trim();
+                        try {
+                            const parsed = JSON.parse(jsonStr);
+
+                            if (parsed.done) {
+                                progressBar.style.width = '100%';
+                                showToast(`تمت معالجة ${parsed.success_count} صورة!`);
+                            } else if (parsed.error) {
+                                showToast(parsed.error, 'error');
+                                processedCount++;
+                                progressText.textContent = `جاري المعالجة... (${processedCount}/${totalCount})`;
+                                progressBar.style.width = `${20 + (processedCount / totalCount) * 70}%`;
+                            } else if (parsed.filename) {
+                                processedCount++;
+                                createResultCard(parsed);
+                                progressText.textContent = `جاري المعالجة... (${processedCount}/${totalCount})`;
+                                progressBar.style.width = `${20 + (processedCount / totalCount) * 70}%`;
+                            }
+                        } catch (e) {
+                            console.error('SSE parse error:', e);
+                        }
+                    }
+                }
             }
         } catch (error) {
-            console.error('Sequential processing error:', error);
+            console.error('Stream processing error:', error);
             showToast('فشل معالجة الصور', 'error');
         }
 
