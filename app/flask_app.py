@@ -80,22 +80,35 @@ cleanup_thread.start()
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 # ============== Model Loading ==============
-# ============== Model Loading ==============
+MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'model')
+MODEL_NAME = "cocktailpeanut/rm"
+
+def load_model():
+    if os.path.exists(os.path.join(MODEL_DIR, 'config.json')):
+        print("Loading BRIA-RMBG-2.0 model from local cache (offline)...")
+        return AutoModelForImageSegmentation.from_pretrained(
+            MODEL_DIR, trust_remote_code=True, local_files_only=True
+        )
+    print("Downloading BRIA-RMBG-2.0 model (first time, will be saved locally)...")
+    model = AutoModelForImageSegmentation.from_pretrained(
+        MODEL_NAME, trust_remote_code=True
+    )
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    model.save_pretrained(MODEL_DIR)
+    print(f"Model saved to {MODEL_DIR} — future runs will be offline.")
+    return model
+
 print("Loading BRIA-RMBG-2.0 model...")
 
-# Optimization: Determine best device and threads
 device = devicetorch.get(torch)
 if device == 'cpu':
-    # Limit threads to avoid contention on typical container vCPUs
     cpu_count = os.cpu_count() or 1
     torch.set_num_threads(max(1, cpu_count))
     print(f"Optimized for CPU: Using {torch.get_num_threads()} threads")
 
-birefnet = AutoModelForImageSegmentation.from_pretrained(
-    "cocktailpeanut/rm", trust_remote_code=True
-)
+birefnet = load_model()
 birefnet = devicetorch.to(torch, birefnet)
-birefnet.eval() # Ensure eval mode
+birefnet.eval()
 
 # CPU Optimization: Dynamic Quantization
 if device == 'cpu':

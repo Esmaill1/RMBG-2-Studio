@@ -15,6 +15,9 @@ build/
 # Output images (don't include in repo)
 output_images/
 
+# Locally saved AI model
+model/
+
 # IDE
 .vscode/
 .idea/

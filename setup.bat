@@ -168,15 +168,15 @@ if errorlevel 1 (
 echo Dependencies installed.
 echo.
 
-:: Step 7: Pre-download the model
-echo [Step 7] Pre-downloading the AI model (this may take a few minutes)...
-python -c "from transformers import AutoModelForImageSegmentation; print('Downloading model...'); AutoModelForImageSegmentation.from_pretrained('cocktailpeanut/rm', trust_remote_code=True); print('Model downloaded and cached!')"
+:: Step 7: Pre-download the model and save locally
+echo [Step 7] Pre-downloading the AI model and saving locally...
+python -c "import os; from transformers import AutoModelForImageSegmentation; model_dir = os.path.join(r'%~dp0', 'model'); if os.path.exists(os.path.join(model_dir, 'config.json')): print('Model already saved locally, skipping...'); else: print('Downloading model...'); os.makedirs(model_dir, exist_ok=True); model = AutoModelForImageSegmentation.from_pretrained('cocktailpeanut/rm', trust_remote_code=True); model.save_pretrained(model_dir); print('Model downloaded and saved to local cache!')"
 if errorlevel 1 (
     echo.
     echo WARNING: Model download was skipped. It will be downloaded automatically on first run (this may take a few minutes).
     echo.
 ) else (
-    echo Model downloaded and cached.
+    echo Model saved locally. No internet needed on future runs.
 )
 echo.
 

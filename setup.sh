@@ -91,6 +91,26 @@ else:
 fi
 
 echo ""
+MODEL_DIR="$PROJECT_ROOT/model"
+
+if [ -f "$MODEL_DIR/config.json" ]; then
+    ok "Model already saved locally — no download needed."
+else
+    info "Pre-downloading AI model and saving locally..."
+    python3 -c "
+import os
+from transformers import AutoModelForImageSegmentation
+model_dir = '$MODEL_DIR'
+os.makedirs(model_dir, exist_ok=True)
+print('Downloading model...')
+model = AutoModelForImageSegmentation.from_pretrained('cocktailpeanut/rm', trust_remote_code=True)
+model.save_pretrained(model_dir)
+print('Model saved to local cache!')
+" || echo -e "${YELLOW}[WARN]${NC} Model download skipped. It will be downloaded on first run."
+    ok "Model saved locally. No internet needed on future runs."
+fi
+
+echo ""
 echo -e "${BOLD}${GREEN}========================================${NC}"
 echo -e "${BOLD}${GREEN}  Setup Complete!${NC}"
 echo -e "${BOLD}${GREEN}========================================${NC}"
