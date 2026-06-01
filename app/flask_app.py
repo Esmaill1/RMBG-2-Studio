@@ -173,7 +173,7 @@ def api_remove_bg():
         if file.filename == '' or not allowed_file(file.filename):
             continue
         file_bytes = BytesIO()
-        file.stream.save(file_bytes)
+        file_bytes.write(file.stream.read())
         file_bytes.seek(0)
         file_data.append({'filename': file.filename, 'bytes': file_bytes})
 
