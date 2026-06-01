@@ -12,7 +12,6 @@ echo   Log file: %LOGFILE%
 echo ================================================
 echo.
 
-:: Step 1: Check Python
 echo [Step 1] Checking Python installation...
 echo [Step 1] Checking Python... >> "%LOGFILE%"
 python --version >> "%LOGFILE%" 2>&1
@@ -29,14 +28,19 @@ echo Python check passed.
 echo [OK] Python version check passed >> "%LOGFILE%"
 echo.
 
-:: Step 2: Check Visual C++ Redistributable
 echo [Step 2] Checking Visual C++ Redistributable...
 echo [Step 2] Checking VC++ Redist... >> "%LOGFILE%"
+echo [Step 2a] Setting VC_INSTALLED=0 >> "%LOGFILE%"
 set VC_INSTALLED=0
+echo [Step 2b] VC_INSTALLED set, running first reg query >> "%LOGFILE%"
 reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" /v Installed >nul 2>&1
+echo [Step 2c] First reg query done >> "%LOGFILE%"
 if not errorlevel 1 set VC_INSTALLED=1
+echo [Step 2d] First reg query check done >> "%LOGFILE%"
 reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" /v Installed >nul 2>&1
+echo [Step 2e] Second reg query done >> "%LOGFILE%"
 if not errorlevel 1 set VC_INSTALLED=1
+echo [Step 2f] VC_INSTALLED=%VC_INSTALLED% >> "%LOGFILE%"
 
 if "%VC_INSTALLED%"=="1" goto :vc_already_installed
 goto :vc_need_install
@@ -97,7 +101,6 @@ pause
 exit /b 1
 
 :step3
-:: Step 3: Create virtual environment
 echo [Step 3] Creating virtual environment...
 echo [Step 3] Creating venv... >> "%LOGFILE%"
 if not exist "%~dp0venv\Scripts\activate.bat" goto :venv_create
@@ -142,7 +145,6 @@ pause
 exit /b 1
 
 :step4
-:: Step 4: Activate virtual environment
 echo [Step 4] Activating virtual environment...
 echo [Step 4] Activating venv... >> "%LOGFILE%"
 call "%~dp0venv\Scripts\activate.bat"
@@ -162,7 +164,6 @@ pause
 exit /b 1
 
 :step5
-:: Step 5: Install CPU-only PyTorch
 echo [Step 5] Installing PyTorch (CPU-only)...
 echo [Step 5] Installing PyTorch... >> "%LOGFILE%"
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu >> "%LOGFILE%" 2>&1
@@ -183,7 +184,6 @@ pause
 exit /b 1
 
 :step6
-:: Step 6: Install application dependencies
 echo [Step 6] Installing application dependencies...
 echo [Step 6] Installing app deps... >> "%LOGFILE%"
 pip install -r "%~dp0app\requirements.txt" >> "%LOGFILE%" 2>&1
@@ -204,7 +204,6 @@ pause
 exit /b 1
 
 :step7
-:: Step 7: Pre-download the model and save locally
 echo [Step 7] Pre-downloading the AI model and saving locally...
 echo [Step 7] Downloading model... >> "%LOGFILE%"
 python "%~dp0download_model.py" >> "%LOGFILE%" 2>&1
@@ -234,3 +233,26 @@ echo.
 echo Setup completed at %date% %time% >> "%LOGFILE%"
 
 pause
+
+:python_not_found
+echo.
+echo ERROR: Python is not installed or not in PATH.
+echo [FAIL] Python not found >> "%LOGFILE%"
+echo Please download Python 3.8+ from:
+echo https://www.python.org/downloads/
+echo.
+echo IMPORTANT: Check "Add Python to PATH" during installation.
+echo.
+pause
+exit /b 1
+
+:python_version_old
+echo.
+echo ERROR: Python version must be 3.8 or higher.
+echo Your version: %PYTHON_VER%
+echo [FAIL] Python version too old >> "%LOGFILE%"
+echo Please download a newer version from:
+echo https://www.python.org/downloads/
+echo.
+pause
+exit /b 1
