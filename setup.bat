@@ -30,17 +30,11 @@ echo.
 
 echo [Step 2] Checking Visual C++ Redistributable...
 echo [Step 2] Checking VC++ Redist... >> "%LOGFILE%"
-echo [Step 2a] Setting VC_INSTALLED=0 >> "%LOGFILE%"
 set VC_INSTALLED=0
-echo [Step 2b] VC_INSTALLED set, running first reg query >> "%LOGFILE%"
 reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" /v Installed >nul 2>&1
-echo [Step 2c] First reg query done >> "%LOGFILE%"
 if not errorlevel 1 set VC_INSTALLED=1
-echo [Step 2d] First reg query check done >> "%LOGFILE%"
 reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" /v Installed >nul 2>&1
-echo [Step 2e] Second reg query done >> "%LOGFILE%"
 if not errorlevel 1 set VC_INSTALLED=1
-echo [Step 2f] VC_INSTALLED=%VC_INSTALLED% >> "%LOGFILE%"
 
 if "%VC_INSTALLED%"=="1" goto :vc_already_installed
 goto :vc_need_install
