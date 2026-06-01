@@ -80,7 +80,7 @@ cleanup_thread.start()
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 # ============== Model Loading ==============
-MODEL_NAME = "briaai/RMBG-2.0"
+MODEL_NAME = "cocktailpeanut/rm"
 
 def load_model():
     print(f"Loading {MODEL_NAME} model...")

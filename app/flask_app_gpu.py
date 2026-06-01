@@ -128,7 +128,7 @@ print(f"  empty_cache:    {'ON (memory-safe)' if USE_EMPTY_CACHE else 'OFF (max 
 print(f"  FP8:            {'ON' if USE_FP8 else 'OFF'}")
 
 # ============== Model Loading ==============
-MODEL_NAME = "briaai/RMBG-2.0"
+MODEL_NAME = "cocktailpeanut/rm"
 
 def load_model():
     print(f"Loading {MODEL_NAME} model (FP16)...")
