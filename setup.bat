@@ -170,7 +170,7 @@ echo.
 
 :: Step 7: Pre-download the model and save locally
 echo [Step 7] Pre-downloading the AI model and saving locally...
-python -c "import os; from transformers import AutoModelForImageSegmentation; model_dir = os.path.join(r'%~dp0', 'model'); if os.path.exists(os.path.join(model_dir, 'config.json')): print('Model already saved locally, skipping...'); else: print('Downloading model...'); os.makedirs(model_dir, exist_ok=True); model = AutoModelForImageSegmentation.from_pretrained('cocktailpeanut/rm', trust_remote_code=True); model.save_pretrained(model_dir); print('Model downloaded and saved!')"
+python "%~dp0download_model.py"
 if errorlevel 1 (
     echo.
     echo WARNING: Model download was skipped. It will be downloaded automatically on first run.
