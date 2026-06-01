@@ -12,24 +12,26 @@ echo   Log file: %LOGFILE%
 echo ================================================
 echo.
 
-echo [Step 1] Checking Python installation...
-echo [Step 1] Checking Python... >> "%LOGFILE%"
+:: Step 1: Check Python
+echo [1/7] Checking Python installation...
+echo [1/7] Checking Python... >> "%LOGFILE%"
+python --version
 python --version >> "%LOGFILE%" 2>&1
 if errorlevel 1 goto :python_not_found
 
 for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PYTHON_VER=%%v
-echo Found Python %PYTHON_VER%
-echo [OK] Python %PYTHON_VER% >> "%LOGFILE%"
+echo       Found Python %PYTHON_VER%
 
 python -c "import sys; exit(0 if sys.version_info >= (3,8) else 1)" >nul 2>&1
 if errorlevel 1 goto :python_version_old
 
-echo Python check passed.
-echo [OK] Python version check passed >> "%LOGFILE%"
+echo       Version check passed (3.8+ required)
+echo [OK] Python %PYTHON_VER% >> "%LOGFILE%"
 echo.
 
-echo [Step 2] Checking Visual C++ Redistributable...
-echo [Step 2] Checking VC++ Redist... >> "%LOGFILE%"
+:: Step 2: Check Visual C++ Redistributable
+echo [2/7] Checking Visual C++ Redistributable...
+echo [2/7] Checking VC++ Redist... >> "%LOGFILE%"
 set VC_INSTALLED=0
 reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" /v Installed >nul 2>&1
 if not errorlevel 1 set VC_INSTALLED=1
@@ -40,31 +42,31 @@ if "%VC_INSTALLED%"=="1" goto :vc_already_installed
 goto :vc_need_install
 
 :vc_already_installed
-echo Visual C++ Redistributable already installed, skipping...
+echo       Already installed, skipping
 echo [OK] VC++ Redist already installed >> "%LOGFILE%"
 echo.
 goto :step3
 
 :vc_need_install
-echo Visual C++ Redistributable not found. Downloading and installing...
+echo       Not found. Downloading...
 echo [INFO] VC++ Redist not found, downloading... >> "%LOGFILE%"
-powershell -Command "Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile '%TEMP%\vc_redist.x64.exe'"
+powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Write-Host 'Downloading VC++ Redistributable...'; Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile '%TEMP%\vc_redist.x64.exe'; Write-Host 'Download complete.'"
 if errorlevel 1 goto :vc_download_fail
 
-echo Installing Visual C++ Redistributable...
+echo       Installing...
 "%TEMP%\vc_redist.x64.exe" /install /quiet /norestart
 set VC_EXIT=%ERRORLEVEL%
 del "%TEMP%\vc_redist.x64.exe" >nul 2>&1
 
 if %VC_EXIT% EQU 3010 (
-    echo Visual C++ Redistributable installed (reboot recommended).
+    echo       Installed successfully (reboot recommended)
     echo [OK] VC++ Redist installed (reboot needed) >> "%LOGFILE%"
     echo.
     goto :step3
 )
 if %VC_EXIT% NEQ 0 goto :vc_install_fail
 
-echo Visual C++ Redistributable installed successfully.
+echo       Installed successfully
 echo [OK] VC++ Redist installed >> "%LOGFILE%"
 echo.
 goto :step3
@@ -95,28 +97,28 @@ pause
 exit /b 1
 
 :step3
-echo [Step 3] Creating virtual environment...
-echo [Step 3] Creating venv... >> "%LOGFILE%"
+:: Step 3: Create virtual environment
+echo [3/7] Creating virtual environment...
+echo [3/7] Creating venv... >> "%LOGFILE%"
 if not exist "%~dp0venv\Scripts\activate.bat" goto :venv_create
 
 call "%~dp0venv\Scripts\activate.bat"
 python -c "import torch" >nul 2>&1
 if not errorlevel 1 goto :venv_healthy
 
-echo Existing virtual environment has a broken PyTorch installation.
+echo       Existing venv has broken PyTorch, recreating...
 echo [INFO] Broken venv, recreating... >> "%LOGFILE%"
-echo Recreating virtual environment...
 call deactivate >nul 2>&1
 rmdir /s /q "%~dp0venv"
 python -m venv "%~dp0venv"
 if errorlevel 1 goto :venv_fail
-echo Virtual environment recreated.
+echo       Virtual environment recreated
 echo [OK] venv recreated >> "%LOGFILE%"
 echo.
 goto :step4
 
 :venv_healthy
-echo Virtual environment already exists and is healthy, skipping...
+echo       Already exists and is healthy, skipping
 echo [OK] venv exists and healthy >> "%LOGFILE%"
 call deactivate >nul 2>&1
 echo.
@@ -125,7 +127,7 @@ goto :step4
 :venv_create
 python -m venv "%~dp0venv"
 if errorlevel 1 goto :venv_fail
-echo Virtual environment created.
+echo       Virtual environment created
 echo [OK] venv created >> "%LOGFILE%"
 echo.
 goto :step4
@@ -139,12 +141,13 @@ pause
 exit /b 1
 
 :step4
-echo [Step 4] Activating virtual environment...
-echo [Step 4] Activating venv... >> "%LOGFILE%"
+:: Step 4: Activate virtual environment
+echo [4/7] Activating virtual environment...
+echo [4/7] Activating venv... >> "%LOGFILE%"
 call "%~dp0venv\Scripts\activate.bat"
 if errorlevel 1 goto :venv_activate_fail
 
-echo Virtual environment activated.
+echo       Activated successfully
 echo [OK] venv activated >> "%LOGFILE%"
 echo.
 goto :step5
@@ -158,12 +161,16 @@ pause
 exit /b 1
 
 :step5
-echo [Step 5] Installing PyTorch (CPU-only)...
-echo [Step 5] Installing PyTorch... >> "%LOGFILE%"
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu >> "%LOGFILE%" 2>&1
+:: Step 5: Install CPU-only PyTorch
+echo [5/7] Installing PyTorch (CPU-only)...
+echo       This may take a few minutes. Download progress shown below:
+echo.
+echo [5/7] Installing PyTorch... >> "%LOGFILE%"
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 if errorlevel 1 goto :pytorch_fail
 
-echo PyTorch installed.
+echo.
+echo       PyTorch installed successfully
 echo [OK] PyTorch installed >> "%LOGFILE%"
 echo.
 goto :step6
@@ -178,12 +185,16 @@ pause
 exit /b 1
 
 :step6
-echo [Step 6] Installing application dependencies...
-echo [Step 6] Installing app deps... >> "%LOGFILE%"
-pip install -r "%~dp0app\requirements.txt" >> "%LOGFILE%" 2>&1
+:: Step 6: Install application dependencies
+echo [6/7] Installing application dependencies...
+echo       This may take a few minutes. Download progress shown below:
+echo.
+echo [6/7] Installing app deps... >> "%LOGFILE%"
+pip install -r "%~dp0app\requirements.txt"
 if errorlevel 1 goto :deps_fail
 
-echo Dependencies installed.
+echo.
+echo       Dependencies installed successfully
 echo [OK] App deps installed >> "%LOGFILE%"
 echo.
 goto :step7
@@ -198,19 +209,25 @@ pause
 exit /b 1
 
 :step7
-echo [Step 7] Pre-downloading the AI model and saving locally...
-echo [Step 7] Downloading model... >> "%LOGFILE%"
-python "%~dp0download_model.py" >> "%LOGFILE%" 2>&1
+:: Step 7: Pre-download the AI model
+echo [7/7] Pre-downloading the AI model...
+echo       This may take a few minutes. Download progress shown below:
+echo.
+echo [7/7] Downloading model... >> "%LOGFILE%"
+python "%~dp0download_model.py"
 if not errorlevel 1 goto :model_ok
 echo.
-echo WARNING: Model download was skipped. It will be downloaded automatically on first run.
+echo WARNING: Model download was skipped.
+echo       It will be downloaded automatically on first run.
 echo [WARN] Model download skipped >> "%LOGFILE%"
 echo.
 goto :done
 
 :model_ok
-echo Model saved locally. No internet needed on future runs.
-echo [OK] Model saved locally >> "%LOGFILE%"
+echo.
+echo       Model downloaded and cached successfully
+echo       No internet needed on future runs!
+echo [OK] Model cached >> "%LOGFILE%"
 echo.
 
 :done
