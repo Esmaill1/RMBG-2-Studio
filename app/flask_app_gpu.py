@@ -128,25 +128,19 @@ print(f"  empty_cache:    {'ON (memory-safe)' if USE_EMPTY_CACHE else 'OFF (max 
 print(f"  FP8:            {'ON' if USE_FP8 else 'OFF'}")
 
 # ============== Model Loading ==============
-MODEL_NAME = "cocktailpeanut/rm"
+MODEL_NAME = "briaai/RMBG-2.0"
 
-def load_model_gpu():
-    try:
-        print("Loading BRIA-RMBG-2.0 model from local cache (offline)...")
-        return AutoModelForImageSegmentation.from_pretrained(
-            MODEL_NAME, trust_remote_code=True, torch_dtype=torch.float16, local_files_only=True
-        )
-    except Exception:
-        print("Model not cached locally. Downloading (first time only)...")
-        model = AutoModelForImageSegmentation.from_pretrained(
-            MODEL_NAME, trust_remote_code=True, torch_dtype=torch.float16
-        )
-        print("Model cached by HuggingFace — future runs will be offline.")
-        return model
+def load_model():
+    print(f"Loading {MODEL_NAME} model (FP16)...")
+    model = AutoModelForImageSegmentation.from_pretrained(
+        MODEL_NAME, trust_remote_code=True, torch_dtype=torch.float16
+    )
+    print("Model loaded successfully.")
+    return model
 
 print("Loading BRIA-RMBG-2.0 model (float16)...")
 
-birefnet = load_model_gpu()
+birefnet = load_model()
 birefnet = birefnet.to(device)
 birefnet.eval()
 

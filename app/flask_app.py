@@ -80,21 +80,15 @@ cleanup_thread.start()
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 # ============== Model Loading ==============
-MODEL_NAME = "cocktailpeanut/rm"
+MODEL_NAME = "briaai/RMBG-2.0"
 
 def load_model():
-    try:
-        print("Loading BRIA-RMBG-2.0 model from local cache (offline)...")
-        return AutoModelForImageSegmentation.from_pretrained(
-            MODEL_NAME, trust_remote_code=True, local_files_only=True
-        )
-    except Exception:
-        print("Model not cached locally. Downloading (first time only)...")
-        model = AutoModelForImageSegmentation.from_pretrained(
-            MODEL_NAME, trust_remote_code=True
-        )
-        print("Model cached by HuggingFace — future runs will be offline.")
-        return model
+    print(f"Loading {MODEL_NAME} model...")
+    model = AutoModelForImageSegmentation.from_pretrained(
+        MODEL_NAME, trust_remote_code=True
+    )
+    print("Model loaded successfully.")
+    return model
 
 print("Loading BRIA-RMBG-2.0 model...")
 
