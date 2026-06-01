@@ -4,22 +4,46 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RMBG-2 Studio | إزالة الخلفية بالذكاء الاصطناعي</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=2) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=3) }}">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Lalezar&family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;700&family=JetBrains+Mono:wght@400;700&family=Lalezar&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="grain-overlay"></div>
-    <div class="grid-overlay"></div>
+
+    <svg class="geometric-overlay" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <pattern id="star-pattern" width="80" height="80" patternUnits="userSpaceOnUse">
+                <polygon points="40,20 44,31 54,26 49,36 60,40 49,44 54,54 44,49 40,60 36,49 26,54 31,44 20,40 31,36 26,26 36,31" fill="none" stroke="#C8963E" stroke-width="0.35" stroke-linejoin="round"/>
+                <line x1="40" y1="0" x2="40" y2="20" stroke="#C8963E" stroke-width="0.2"/>
+                <line x1="40" y1="60" x2="40" y2="80" stroke="#C8963E" stroke-width="0.2"/>
+                <line x1="0" y1="40" x2="20" y2="40" stroke="#C8963E" stroke-width="0.2"/>
+                <line x1="60" y1="40" x2="80" y2="40" stroke="#C8963E" stroke-width="0.2"/>
+            </pattern>
+        </defs>
+        <rect width="10000" height="10000" fill="url(#star-pattern)"/>
+    </svg>
 
     <div class="app-container">
         <main class="main-content anim-stagger" data-delay="0">
             <header class="section-header anim-stagger" data-delay="1">
+                <svg class="crescent-moon" viewBox="0 0 100 100" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <mask id="crescent-mask">
+                            <circle cx="50" cy="50" r="40" fill="white"/>
+                            <circle cx="62" cy="44" r="36" fill="black"/>
+                        </mask>
+                    </defs>
+                    <circle cx="50" cy="50" r="40" fill="currentColor" mask="url(#crescent-mask)"/>
+                </svg>
                 <div class="header-accent-line"></div>
                 <div class="corner-accent top-right"></div>
                 <div class="corner-accent bottom-left"></div>
                 <h1>ستوديو الهلال</h1>
-                <p>اداة إزالة الخلفيات .</p>
+                <svg class="calligraphic-arc" viewBox="0 0 400 30" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20,25 C120,5 280,5 380,20" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" class="arc-path"/>
+                </svg>
+                <p>أداة إزالة الخلفيات بالذكاء الاصطناعي</p>
                 <div class="model-badge">
                     <i class="ph ph-microchip"></i>
                     <span>BRIA-RMBG 2.0</span>
@@ -29,7 +53,6 @@
             <div class="workspace anim-stagger" data-delay="2">
                 <div class="upload-zone" id="upload-zone">
                     <input type="file" id="file-input" accept="image/*" multiple hidden>
-                    <div class="upload-glow-ring"></div>
                     <div class="upload-content">
                         <div class="upload-icon-wrapper">
                             <i class="ph ph-cloud-arrow-up"></i>
@@ -67,6 +90,6 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='app.js', v=2) }}"></script>
+    <script src="{{ url_for('static', filename='app.js', v=3) }}"></script>
 </body>
 </html>

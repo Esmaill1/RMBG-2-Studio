@@ -1,0 +1,16 @@
+- generic [active] [ref=e1]:
+  - img
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - img [ref=e5]
+      - heading "ستوديو الهلال" [level=1] [ref=e10]
+      - img [ref=e11]
+      - paragraph [ref=e13]: أداة إزالة الخلفيات بالذكاء الاصطناعي
+      - generic [ref=e15]: BRIA-RMBG 2.0
+    - generic [ref=e16]:
+      - generic [ref=e18] [cursor=pointer]:
+        - generic [ref=e20]: 
+        - heading "رفع الصور" [level=3] [ref=e21]
+        - paragraph [ref=e22]: اسحب وأفلت الملفات هنا
+        - generic [ref=e23]: JPG, PNG, WEBP (بحد أقصى 200 ميجابايت)
+      - text:  
