@@ -8,7 +8,7 @@ echo ================================================
 echo.
 echo This will delete:
 echo   - All processed images
-echo   - The locally saved AI model (~176MB)
+echo   - The HuggingFace model cache (~176MB)
 echo.
 set /p CONFIRM="Continue? (Y/N): "
 if /i not "%CONFIRM%"=="Y" (
@@ -28,17 +28,13 @@ if exist "%~dp0output_images" (
     echo No output_images directory found.
 )
 
-:: Delete model cache (local + HuggingFace cache)
+:: Delete model cache (HuggingFace cache)
 echo Deleting model cache...
-if exist "%~dp0model" (
-    rd /s /q "%~dp0model"
-    echo Local model deleted.
-) else (
-    echo No local model directory found.
-)
 if exist "%USERPROFILE%\.cache\huggingface\hub\models--cocktailpeanut--rm" (
     rd /s /q "%USERPROFILE%\.cache\huggingface\hub\models--cocktailpeanut--rm"
-    echo HuggingFace cache deleted.
+    echo HuggingFace model cache deleted.
+) else (
+    echo No HuggingFace model cache found.
 )
 
 echo.

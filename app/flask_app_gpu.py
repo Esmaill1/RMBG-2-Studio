@@ -128,23 +128,21 @@ print(f"  empty_cache:    {'ON (memory-safe)' if USE_EMPTY_CACHE else 'OFF (max 
 print(f"  FP8:            {'ON' if USE_FP8 else 'OFF'}")
 
 # ============== Model Loading ==============
-MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'model_gpu')
 MODEL_NAME = "cocktailpeanut/rm"
 
 def load_model_gpu():
-    if os.path.exists(os.path.join(MODEL_DIR, 'config.json')):
+    try:
         print("Loading BRIA-RMBG-2.0 model from local cache (offline)...")
         return AutoModelForImageSegmentation.from_pretrained(
-            MODEL_DIR, trust_remote_code=True, torch_dtype=torch.float16, local_files_only=True
+            MODEL_NAME, trust_remote_code=True, torch_dtype=torch.float16, local_files_only=True
         )
-    print("Downloading BRIA-RMBG-2.0 model (first time, will be saved locally)...")
-    model = AutoModelForImageSegmentation.from_pretrained(
-        MODEL_NAME, trust_remote_code=True, torch_dtype=torch.float16
-    )
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    model.save_pretrained(MODEL_DIR)
-    print(f"Model saved to {MODEL_DIR} — future runs will be offline.")
-    return model
+    except Exception:
+        print("Model not cached locally. Downloading (first time only)...")
+        model = AutoModelForImageSegmentation.from_pretrained(
+            MODEL_NAME, trust_remote_code=True, torch_dtype=torch.float16
+        )
+        print("Model cached by HuggingFace — future runs will be offline.")
+        return model
 
 print("Loading BRIA-RMBG-2.0 model (float16)...")
 
