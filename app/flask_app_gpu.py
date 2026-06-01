@@ -128,7 +128,7 @@ print(f"  empty_cache:    {'ON (memory-safe)' if USE_EMPTY_CACHE else 'OFF (max 
 print(f"  FP8:            {'ON' if USE_FP8 else 'OFF'}")
 
 # ============== Model Loading ==============
-MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'model')
+MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'model_gpu')
 MODEL_NAME = "cocktailpeanut/rm"
 
 def load_model_gpu():

@@ -17,6 +17,7 @@ output_images/
 
 # Locally saved AI model
 model/
+model_gpu/
 
 # IDE
 .vscode/

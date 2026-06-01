@@ -91,13 +91,13 @@ else:
 fi
 
 echo ""
-MODEL_DIR="$PROJECT_ROOT/model"
-
-if [ -f "$MODEL_DIR/config.json" ]; then
-    ok "Model already saved locally — no download needed."
-else
-    info "Pre-downloading AI model and saving locally..."
-    python3 -c "
+if [ "$MODE" = "1" ]; then
+    MODEL_DIR="$PROJECT_ROOT/model"
+    if [ -f "$MODEL_DIR/config.json" ]; then
+        ok "CPU model already saved locally — no download needed."
+    else
+        info "Pre-downloading CPU model and saving locally..."
+        python3 -c "
 import os
 from transformers import AutoModelForImageSegmentation
 model_dir = '$MODEL_DIR'
@@ -107,7 +107,26 @@ model = AutoModelForImageSegmentation.from_pretrained('cocktailpeanut/rm', trust
 model.save_pretrained(model_dir)
 print('Model saved to local cache!')
 " || echo -e "${YELLOW}[WARN]${NC} Model download skipped. It will be downloaded on first run."
-    ok "Model saved locally. No internet needed on future runs."
+        ok "Model saved locally. No internet needed on future runs."
+    fi
+else
+    MODEL_DIR="$PROJECT_ROOT/model_gpu"
+    if [ -f "$MODEL_DIR/config.json" ]; then
+        ok "GPU model already saved locally — no download needed."
+    else
+        info "Pre-downloading GPU model (float16) and saving locally..."
+        python3 -c "
+import os, torch
+from transformers import AutoModelForImageSegmentation
+model_dir = '$MODEL_DIR'
+os.makedirs(model_dir, exist_ok=True)
+print('Downloading model (float16)...')
+model = AutoModelForImageSegmentation.from_pretrained('cocktailpeanut/rm', trust_remote_code=True, torch_dtype=torch.float16)
+model.save_pretrained(model_dir)
+print('Model saved to local cache!')
+" || echo -e "${YELLOW}[WARN]${NC} Model download skipped. It will be downloaded on first run."
+        ok "Model saved locally. No internet needed on future runs."
+    fi
 fi
 
 echo ""
