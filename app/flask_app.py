@@ -165,7 +165,7 @@ def index():
 
 @app.route('/api/remove-bg', methods=['POST'])
 def api_remove_bg():
-    """API endpoint to remove background from uploaded images (Batch Support)"""
+    """API endpoint to remove background from uploaded images (Sequential Processing)"""
     if 'images' not in request.files:
         return jsonify({'error': 'No image files provided'}), 400
     
@@ -204,7 +204,7 @@ def api_remove_bg():
             })
         except Exception as e:
             print(f"Error processing {file.filename}: {e}")
-            # Continue processing displaying errors isn't helpful for partial batches
+            # Continue processing — displaying errors isn't helpful for partial results
             
     return jsonify({
         'success': True,

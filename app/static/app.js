@@ -42,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingContainer.style.display = 'flex';
         progressBar.style.width = '5%';
         resultsHeader.style.display = 'flex';
-        progressText.textContent = `جاري المعالجة ${imageFiles.length} صورة في دفعة واحدة...`;
+        progressText.textContent = `جاري المعالجة ${imageFiles.length} صورة واحدة تلو الأخرى...`;
 
         const formData = new FormData();
         imageFiles.forEach(file => formData.append('images', file));
@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast(data.error, 'error');
             }
         } catch (error) {
-            console.error('Batch processing error:', error);
+            console.error('Sequential processing error:', error);
             showToast('فشل معالجة الصور', 'error');
         }
 
@@ -152,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `rmbg_batch_${new Date().getTime()}.zip`;
+                a.download = `rmbg_results_${new Date().getTime()}.zip`;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
