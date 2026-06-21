@@ -140,9 +140,19 @@ if USE_GPU:
     print(f"  kornia:         {'ON' if USE_KORNIA else 'OFF (fallback to torchvision)'}")
 
     print(f"Loading BRIA-RMBG-2.0 model (FP16) from {model_source}...")
-    birefnet = AutoModelForImageSegmentation.from_pretrained(
-        model_source, trust_remote_code=True, torch_dtype=torch.float16
-    )
+    try:
+        birefnet = AutoModelForImageSegmentation.from_pretrained(
+            model_source, trust_remote_code=True, torch_dtype=torch.float16
+        )
+    except (ValueError, OSError) as e:
+        if model_source != "cocktailpeanut/rm":
+            print(f"WARNING: Failed to load from local source '{model_source}': {e}")
+            print("Falling back to Hugging Face Hub ('cocktailpeanut/rm')...")
+            birefnet = AutoModelForImageSegmentation.from_pretrained(
+                "cocktailpeanut/rm", trust_remote_code=True, torch_dtype=torch.float16
+            )
+        else:
+            raise e
     birefnet = birefnet.to(device)
     birefnet.eval()
 
@@ -304,9 +314,19 @@ else:
         print(f"No CUDA GPU detected. Running on {device_str} via devicetorch.")
 
     print(f"Loading BRIA-RMBG-2.0 model from {model_source}...")
-    birefnet = AutoModelForImageSegmentation.from_pretrained(
-        model_source, trust_remote_code=True
-    )
+    try:
+        birefnet = AutoModelForImageSegmentation.from_pretrained(
+            model_source, trust_remote_code=True
+        )
+    except (ValueError, OSError) as e:
+        if model_source != "cocktailpeanut/rm":
+            print(f"WARNING: Failed to load from local source '{model_source}': {e}")
+            print("Falling back to Hugging Face Hub ('cocktailpeanut/rm')...")
+            birefnet = AutoModelForImageSegmentation.from_pretrained(
+                "cocktailpeanut/rm", trust_remote_code=True
+            )
+        else:
+            raise e
     birefnet = devicetorch.to(torch, birefnet)
     birefnet.eval()
 
