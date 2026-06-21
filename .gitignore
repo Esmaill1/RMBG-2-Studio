@@ -1,0 +1,40 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Output images (don't include in repo)
+output_images/
+
+# Local model cache (large weights, don't include in repo)
+model/
+model_gpu/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gradio cache (legacy)
+.gradio/
+
+# Binary files (HF requires LFS for these)
+icon.png
+screenshots/
+*.png
+*.jpg
+*.jpeg

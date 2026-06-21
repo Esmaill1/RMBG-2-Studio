@@ -1,0 +1,28 @@
+# ============================================================
+# RMBG-2-Studio Dependencies
+# ============================================================
+# torch and torchvision are NOT listed here — they are installed
+# automatically by setup.bat / setup.sh with the correct variant
+# (CPU-only or CUDA GPU) based on your hardware.
+# ============================================================
+
+# Core ML
+transformers>=4.39.1,<4.50.0
+timm
+kornia
+devicetorch
+
+# Image processing
+pillow
+opencv-python-headless
+numpy
+scikit-image
+
+# Web framework
+flask>=3.0.0
+werkzeug
+
+# Utilities
+fsspec
+huggingface-hub
+pydantic
