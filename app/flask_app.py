@@ -5,6 +5,7 @@ Auto-detects GPU: runs optimized GPU path if CUDA available, CPU path otherwise.
 """
 
 import os
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 import sys
 import uuid
 import time
@@ -108,9 +109,12 @@ if USE_GPU:
     if gpu_mem_total < 4:
         print("WARNING: GPU has less than 4GB VRAM. Performance will be limited.")
 
-    recommended_batch = 4 if gpu_mem_total < 6 else 8 if gpu_mem_total < 12 else \
-                        16 if gpu_mem_total < 24 else 32 if gpu_mem_total < 48 else \
-                        64 if gpu_mem_total < 96 else 128
+    recommended_batch = 1 if gpu_mem_total < 4 else \
+                        2 if gpu_mem_total < 8 else \
+                        4 if gpu_mem_total < 16 else \
+                        8 if gpu_mem_total < 24 else \
+                        16 if gpu_mem_total < 48 else \
+                        32 if gpu_mem_total < 80 else 64
     MAX_BATCH_SIZE = int(os.environ.get('MAX_BATCH_SIZE', str(recommended_batch)))
 
     recommended_compile = '0'  # Off by default — warmup takes 5-15 min. Set TORCH_COMPILE=1 to enable.
