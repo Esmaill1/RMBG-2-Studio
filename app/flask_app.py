@@ -181,34 +181,33 @@ if USE_GPU:
     # CUDA stream for overlapping preprocessing with inference
     preprocess_stream = torch.cuda.Stream()
 
-    if USE_KORNIA:
-        NORM_MEAN = torch.tensor([0.485, 0.456, 0.406], device=device, dtype=torch.float32).view(1, 3, 1, 1)
-        NORM_STD = torch.tensor([0.229, 0.224, 0.225], device=device, dtype=torch.float32).view(1, 3, 1, 1)
+    # GPU Preprocessing — optimized to resize on CPU to reduce PCIe transfer size
+    # and normalize on GPU for speed.
+    NORM_MEAN = torch.tensor([0.485, 0.456, 0.406], device=device, dtype=torch.float32).view(1, 3, 1, 1)
+    NORM_STD = torch.tensor([0.229, 0.224, 0.225], device=device, dtype=torch.float32).view(1, 3, 1, 1)
 
-        def preprocess_gpu(image):
-            raw = kornia.image.image_to_tensor(np.array(image), keepdim=False).float()
-            raw = raw.pin_memory().to(device, non_blocking=True)
-            resized = kornia.geometry.transform.resize(raw, (1024, 1024), interpolation='bilinear', align_corners=False)
-            return (resized - NORM_MEAN) / NORM_STD
+    import torchvision.transforms.functional as TF
 
-        def preprocess_gpu_batch(images):
-            raw_tensors = [kornia.image.image_to_tensor(np.array(img), keepdim=False).float() for img in images]
-            batch_raw = torch.cat(raw_tensors, dim=0).pin_memory().to(device, non_blocking=True)
-            resized = kornia.geometry.transform.resize(batch_raw, (1024, 1024), interpolation='bilinear', align_corners=False)
-            return (resized - NORM_MEAN) / NORM_STD
-    else:
-        gpu_transform = transforms.Compose([
-            transforms.Resize((1024, 1024)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ])
+    def preprocess_gpu(image):
+        # Resize on CPU to 1024x1024 (reduces PCIe transfer size by up to 50x)
+        resized_pil = image.resize((1024, 1024), Image.BILINEAR)
+        # Convert to tensor and scale to [0, 1] on CPU
+        tensor = TF.to_tensor(resized_pil)
+        # Asynchronously transfer to GPU using pinned memory
+        tensor_gpu = tensor.pin_memory().to(device, non_blocking=True).unsqueeze(0)
+        # Normalize on GPU
+        return (tensor_gpu - NORM_MEAN) / NORM_STD
 
-        def preprocess_gpu(image):
-            return gpu_transform(image).unsqueeze(0).to(device)
-
-        def preprocess_gpu_batch(images):
-            tensors = [gpu_transform(img).unsqueeze(0) for img in images]
-            return torch.cat(tensors, dim=0).to(device)
+    def preprocess_gpu_batch(images):
+        tensors = []
+        for img in images:
+            resized_pil = img.resize((1024, 1024), Image.BILINEAR)
+            tensor = TF.to_tensor(resized_pil)
+            tensors.append(tensor)
+        # Stack on CPU, then transfer to GPU
+        batch_tensor = torch.stack(tensors, dim=0).pin_memory().to(device, non_blocking=True)
+        # Normalize on GPU
+        return (batch_tensor - NORM_MEAN) / NORM_STD
 
     save_executor = ThreadPoolExecutor(max_workers=4)
 
