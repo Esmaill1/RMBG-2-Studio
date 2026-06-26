@@ -21,7 +21,7 @@ echo "Choose installation mode:"
 echo -e "  ${YELLOW}1)${NC} CPU-only  (smaller download, no GPU required)"
 echo -e "  ${YELLOW}2)${NC} GPU/CUDA  (requires NVIDIA GPU + drivers)"
 echo ""
-read -p "Enter choice [1/2]: " MODE
+MODE=2
 
 if [ "$MODE" != "1" ] && [ "$MODE" != "2" ]; then
     error "Invalid choice '$MODE'. Must be 1 or 2."
