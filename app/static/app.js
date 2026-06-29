@@ -9,6 +9,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const downloadAllBtn = document.getElementById('download-all-btn');
     const clearAllBtn = document.getElementById('clear-all-btn');
     const googleDriveBtn = document.getElementById('google-drive-btn');
+    const cancelProcessBtn = document.getElementById('cancel-process-btn');
+
+    let currentXhr = null;
+    let currentAbortController = null;
+
+    cancelProcessBtn.addEventListener('click', () => {
+        if (currentXhr) {
+            currentXhr.abort();
+            currentXhr = null;
+            showToast('تم إلغاء عملية الرفع والمعالجة المحلية', 'error');
+        }
+        if (currentAbortController) {
+            currentAbortController.abort();
+            currentAbortController = null;
+            showToast('تم إلغاء عملية استيراد ومعالجة Google Drive', 'error');
+        }
+        progressSection.style.display = 'none';
+    });
 
     uploadZone.addEventListener('click', () => fileInput.click());
     uploadZone.addEventListener('dragover', (e) => {
@@ -50,6 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const uploadPromise = new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
+            currentXhr = xhr;
 
             // Track upload progress (file transfer to server)
             xhr.upload.addEventListener('progress', (e) => {
@@ -117,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('خطأ في معالجة الصور', 'error');
             })
             .then(() => {
+                currentXhr = null;
                 setTimeout(() => {
                     progressSection.style.display = 'none';
                 }, 1500);
@@ -385,58 +405,93 @@ document.addEventListener('DOMContentLoaded', () => {
             folders: folders
         };
 
-        const processingPromise = new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
+        const controller = new AbortController();
+        currentAbortController = controller;
 
-            xhr.addEventListener('load', () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    try {
-                        resolve(JSON.parse(xhr.responseText));
-                    } catch (e) {
-                        reject(new Error('Invalid JSON response'));
+        fetch('/api/remove-bg-drive', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Server returned status: ${response.status}`);
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            
+            let buffer = '';
+
+            function read() {
+                return reader.read().then(({ done, value }) => {
+                    if (done) {
+                        return;
                     }
-                } else {
-                    reject(new Error(`Server error: ${xhr.status}`));
-                }
-            });
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    
+                    // Keep the last partial line in the buffer
+                    buffer = lines.pop();
 
-            xhr.addEventListener('error', () => reject(new Error('Network error')));
-            xhr.addEventListener('abort', () => reject(new Error('Processing aborted')));
+                    lines.forEach(line => {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.substring(6));
+                                if (data.error) {
+                                    showToast(data.error, 'error');
+                                    progressText.textContent = 'فشلت المعالجة';
+                                    return;
+                                }
+                                
+                                if (data.status === 'importing') {
+                                    // Update progress for downloading from Drive
+                                    const percent = Math.round((data.current / data.total) * 40);
+                                    progressBar.style.width = `${percent}%`;
+                                    progressText.textContent = data.message;
+                                } else if (data.status === 'processing_start') {
+                                    progressBar.style.width = '45%';
+                                    progressText.textContent = data.message;
+                                } else if (data.status === 'processing') {
+                                    // Update progress for background removal
+                                    const percent = 45 + Math.round((data.current / data.total) * 50);
+                                    progressBar.style.width = `${percent}%`;
+                                    progressText.textContent = data.message;
+                                } else if (data.success && data.results) {
+                                    progressBar.style.width = '100%';
+                                    data.results.forEach(r => createResultCard(r));
+                                    const elapsed = data.processing_time ? ` (${data.processing_time})` : '';
+                                    progressText.textContent = `انتهت المعالجة — تم استيراد ${data.results.length} صورة${elapsed}`;
+                                    showToast(`تم استيراد ومعالجة ${data.results.length} صورة من Google Drive`);
+                                }
+                            } catch (e) {
+                                console.error('Error parsing SSE line:', e);
+                            }
+                        }
+                    });
 
-            xhr.open('POST', '/api/remove-bg-drive');
-            xhr.setRequestHeader('Content-Type', 'application/json');
-            xhr.send(JSON.stringify(requestBody));
-        });
+                    return read();
+                });
+            }
 
-        animateProcessing();
-
-        processingPromise
-            .then(result => {
-                progressBar.style.width = '100%';
-                stopProcessingAnimation();
-
-                if (result.success && result.results) {
-                    result.results.forEach(r => createResultCard(r));
-                    const elapsed = result.processing_time ? ` (${result.processing_time})` : '';
-                    progressText.textContent = `انتهت المعالجة — تم استيراد ${result.results.length} صورة${elapsed}`;
-                    showToast(`تم استيراد ومعالجة ${result.results.length} صورة من Google Drive`);
-                } else {
-                    progressText.textContent = 'فشلت المعالجة';
-                    showToast(result.error || 'فشلت المعالجة', 'error');
-                }
-            })
-            .catch(error => {
+            return read();
+        })
+        .catch(error => {
+            if (error.name === 'AbortError') {
+                console.log('Google Drive processing aborted');
+            } else {
                 console.error('Drive processing error:', error);
-                progressBar.style.width = '100%';
-                stopProcessingAnimation();
                 progressText.textContent = 'حدث خطأ';
                 showToast('خطأ في معالجة صور Google Drive', 'error');
-            })
-            .then(() => {
-                setTimeout(() => {
-                    progressSection.style.display = 'none';
-                }, 1500);
-            });
+            }
+        })
+        .then(() => {
+            currentAbortController = null;
+            setTimeout(() => {
+                progressSection.style.display = 'none';
+            }, 1500);
+        });
     }
 
     function showToast(message, type = 'success') {

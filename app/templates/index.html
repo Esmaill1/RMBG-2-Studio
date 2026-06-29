@@ -49,7 +49,12 @@
                     <div class="progress-bar-track">
                         <div class="progress-bar-fill" id="progress-bar"></div>
                     </div>
-                    <span class="progress-label" id="progress-text">يعالج الصور...</span>
+                    <div class="progress-details" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 0.55rem; gap: 1rem;">
+                        <span class="progress-label" id="progress-text" style="margin-top: 0;">يعالج الصور...</span>
+                        <button id="cancel-process-btn" class="btn btn-ghost-danger btn-sm" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; font-weight: 700;" title="إلغاء العملية">
+                            <i class="ph ph-stop"></i> إلغاء العملية
+                        </button>
+                    </div>
                 </div>
 
                 <div class="results-header" id="results-header" style="display: none;">

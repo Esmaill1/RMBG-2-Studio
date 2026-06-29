@@ -534,138 +534,155 @@ def api_remove_bg_drive():
         return jsonify({'error': 'No access token provided'}), 400
         
     access_token = data['accessToken']
-    files_to_download = []
+    
+    def generate():
+        files_to_download = []
 
-    # Add directly selected files
-    if 'files' in data:
-        for f in data['files']:
-            files_to_download.append({
-                'id': f['id'],
-                'name': f['name'],
-                'mimeType': f.get('mimeType', 'image/png')
-            })
+        # Add directly selected files
+        if 'files' in data:
+            for f in data['files']:
+                files_to_download.append({
+                    'id': f['id'],
+                    'name': f['name'],
+                    'mimeType': f.get('mimeType', 'image/png')
+                })
 
-    # Query folder files and add them
-    if 'folders' in data:
-        for folder in data['folders']:
-            folder_id = folder['id']
-            folder_name = folder['name']
+        # Query folder files and add them
+        if 'folders' in data:
+            for folder in data['folders']:
+                folder_id = folder['id']
+                folder_name = folder['name']
+                try:
+                    # Query Drive API for nested images inside this folder
+                    query = quote(f"'{folder_id}' in parents and trashed = false and mimeType contains 'image/'")
+                    url = f"https://www.googleapis.com/drive/v3/files?q={query}&fields=files(id,name,mimeType)"
+                    req = urllib.request.Request(url, headers={'Authorization': f'Bearer {access_token}'})
+                    with urllib.request.urlopen(req) as response:
+                        res_data = json.loads(response.read().decode('utf-8'))
+                        for f in res_data.get('files', []):
+                            files_to_download.append({
+                                'id': f['id'],
+                                'name': f['name'],
+                                'mimeType': f.get('mimeType', 'image/png')
+                            })
+                except Exception as e:
+                    print(f"Error listing folder {folder_name} ({folder_id}): {e}")
+
+        if not files_to_download:
+            yield f"data: {json.dumps({'error': 'لم يتم العثور على صور في الملفات أو المجلدات المحددة'})}\n\n"
+            return
+
+        valid_images = []
+        file_info = []
+
+        total_files = len(files_to_download)
+        
+        for idx, file_meta in enumerate(files_to_download):
+            file_id = file_meta['id']
+            filename = file_meta['name']
+            
+            # Send importing progress update
+            yield f"data: {json.dumps({'status': 'importing', 'current': idx + 1, 'total': total_files, 'message': f'جاري استيراد {idx + 1}/{total_files}: {filename}'})}\n\n"
+            
             try:
-                # Query Drive API for nested images inside this folder
-                query = quote(f"'{folder_id}' in parents and trashed = false and mimeType contains 'image/'")
-                url = f"https://www.googleapis.com/drive/v3/files?q={query}&fields=files(id,name,mimeType)"
+                # Download file from Drive
+                url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
                 req = urllib.request.Request(url, headers={'Authorization': f'Bearer {access_token}'})
                 with urllib.request.urlopen(req) as response:
-                    res_data = json.loads(response.read().decode('utf-8'))
-                    for f in res_data.get('files', []):
-                        files_to_download.append({
-                            'id': f['id'],
-                            'name': f['name'],
-                            'mimeType': f.get('mimeType', 'image/png')
-                        })
+                    image_bytes = response.read()
+                    image = Image.open(BytesIO(image_bytes))
+                    image = ImageOps.exif_transpose(image)
+                    image = image.convert('RGB')
+                    original_base = os.path.splitext(secure_filename(filename))[0]
+                    if not original_base:
+                        original_base = "drive_image"
+                    valid_images.append(image)
+                    file_info.append({
+                        'original_base': original_base,
+                        'original_name': filename
+                    })
             except Exception as e:
-                print(f"Error listing folder {folder_name} ({folder_id}): {e}")
+                print(f"Error downloading Google Drive file {filename} ({file_id}): {e}")
 
-    if not files_to_download:
-        return jsonify({'error': 'No files found to process'}), 400
+        if not valid_images:
+            yield f"data: {json.dumps({'error': 'فشل تحميل أي صور من Google Drive'})}\n\n"
+            return
 
-    # Downloader helper
-    valid_images = []
-    file_info = []
+        # Send starting processing update
+        yield f"data: {json.dumps({'status': 'processing_start', 'total': len(valid_images), 'message': f'تم الاستيراد بنجاح! جاري معالجة {len(valid_images)} صورة...'})}\n\n"
 
-    for file_meta in files_to_download:
-        file_id = file_meta['id']
-        filename = file_meta['name']
-        try:
-            # Download file from Drive
-            url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-            req = urllib.request.Request(url, headers={'Authorization': f'Bearer {access_token}'})
-            with urllib.request.urlopen(req) as response:
-                image_bytes = response.read()
-                image = Image.open(BytesIO(image_bytes))
-                image = ImageOps.exif_transpose(image)
-                image = image.convert('RGB')
-                original_base = os.path.splitext(secure_filename(filename))[0]
-                if not original_base:
-                    original_base = "drive_image"
-                valid_images.append(image)
-                file_info.append({
-                    'original_base': original_base,
-                    'original_name': filename
-                })
-        except Exception as e:
-            print(f"Error downloading Google Drive file {filename} ({file_id}): {e}")
-
-    if not valid_images:
-        return jsonify({'error': 'Failed to download any images from Google Drive'}), 400
-
-    # Process background removal using the existing CPU/GPU pipeline
-    if USE_GPU:
-        try:
-            t_start = time.time()
-            processed_images = remove_background_batch(valid_images)
-            if birefnet is not None:
-                torch.cuda.synchronize()
-            t_inference = time.time() - t_start
-        except Exception as e:
-            print(f"Batch inference error: {e}")
-            if birefnet is not None:
-                torch.cuda.empty_cache()
-            return jsonify({'error': 'Inference failed'}), 500
-
-        save_futures = []
-        results = []
-        for i, processed in enumerate(processed_images):
-            original_base = file_info[i]['original_base']
-            filename = f"{original_base}.png"
-            counter = 1
-            while os.path.exists(os.path.join(OUTPUT_FOLDER, filename)):
-                filename = f"{original_base}_{counter}.png"
-                counter += 1
-            output_path = os.path.join(OUTPUT_FOLDER, filename)
-            save_futures.append(save_executor.submit(save_result_async, processed, output_path))
-            results.append({
-                'filename': filename,
-                'url': f'/output/{filename}',
-                'original_name': file_info[i]['original_name']
-            })
-
-        for future in save_futures:
-            future.result()
-
-        total_time = time.time() - t_start
-        time_str = f"{total_time:.1f}s"
-        print(f"Total request (Google Drive): {len(valid_images)} images processed in {total_time:.2f}s")
-        return jsonify({'success': True, 'results': results, 'processing_time': time_str})
-
-    else:
         results = []
         t_start = time.time()
-        for i, image in enumerate(valid_images):
+        
+        # Process background removal using the existing CPU/GPU pipeline
+        if USE_GPU:
             try:
-                processed = remove_background(image)
+                processed_images = remove_background_batch(valid_images)
+                if birefnet is not None:
+                    torch.cuda.synchronize()
+                t_inference = time.time() - t_start
+            except Exception as e:
+                print(f"Batch inference error: {e}")
+                if birefnet is not None:
+                    torch.cuda.empty_cache()
+                yield f"data: {json.dumps({'error': 'فشلت عملية معالجة الصور بالذكاء الاصطناعي'})}\n\n"
+                return
+
+            save_futures = []
+            for i, processed in enumerate(processed_images):
                 original_base = file_info[i]['original_base']
                 filename = f"{original_base}.png"
                 counter = 1
                 while os.path.exists(os.path.join(OUTPUT_FOLDER, filename)):
                     filename = f"{original_base}_{counter}.png"
                     counter += 1
-
                 output_path = os.path.join(OUTPUT_FOLDER, filename)
-                processed.save(output_path, 'PNG')
-
+                save_futures.append(save_executor.submit(save_result_async, processed, output_path))
                 results.append({
                     'filename': filename,
                     'url': f'/output/{filename}',
                     'original_name': file_info[i]['original_name']
                 })
-            except Exception as e:
-                print(f"Error processing {file_info[i]['original_name']}: {e}")
 
-        total_time = time.time() - t_start
-        time_str = f"{total_time:.1f}s"
-        print(f"Total request (Google Drive CPU): {len(valid_images)} images processed in {total_time:.2f}s")
-        return jsonify({'success': True, 'results': results, 'processing_time': time_str})
+            for i, future in enumerate(save_futures):
+                # Send processing progress updates during saving
+                yield f"data: {json.dumps({'status': 'processing', 'current': i + 1, 'total': len(save_futures), 'message': f'جاري معالجة وحفظ الصورة {i + 1}/{len(save_futures)}'})}\n\n"
+                future.result()
+
+            total_time = time.time() - t_start
+            time_str = f"{total_time:.1f}s"
+            yield f"data: {json.dumps({'success': True, 'results': results, 'processing_time': time_str})}\n\n"
+
+        else:
+            t_start = time.time()
+            for i, image in enumerate(valid_images):
+                # Send processing progress updates for each image in CPU sequential path
+                yield f"data: {json.dumps({'status': 'processing', 'current': i + 1, 'total': len(valid_images), 'message': f'جاري معالجة وحفظ الصورة {i + 1}/{len(valid_images)}'})}\n\n"
+                try:
+                    processed = remove_background(image)
+                    original_base = file_info[i]['original_base']
+                    filename = f"{original_base}.png"
+                    counter = 1
+                    while os.path.exists(os.path.join(OUTPUT_FOLDER, filename)):
+                        filename = f"{original_base}_{counter}.png"
+                        counter += 1
+
+                    output_path = os.path.join(OUTPUT_FOLDER, filename)
+                    processed.save(output_path, 'PNG')
+
+                    results.append({
+                        'filename': filename,
+                        'url': f'/output/{filename}',
+                        'original_name': file_info[i]['original_name']
+                    })
+                except Exception as e:
+                    print(f"Error processing {file_info[i]['original_name']}: {e}")
+
+            total_time = time.time() - t_start
+            time_str = f"{total_time:.1f}s"
+            yield f"data: {json.dumps({'success': True, 'results': results, 'processing_time': time_str})}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream')
 
 @app.route('/api/zip', methods=['POST'])
 def api_download_zip():
