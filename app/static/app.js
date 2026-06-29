@@ -29,10 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target.files.length) handleUpload(e.target.files);
     });
 
-    async function handleUpload(files) {
+    function handleUpload(files) {
         if (files.length === 0) return;
 
-        const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+        const imageFiles = Array.prototype.slice.call(files).filter(f => f.type.indexOf('image/') === 0);
         if (imageFiles.length === 0) return;
 
         progressSection.style.display = 'flex';
@@ -47,80 +47,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
         progressText.textContent = `يرفع ${totalImages} صورة...`;
 
-        try {
-            // Use XMLHttpRequest for upload progress tracking
-            const result = await new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
+        const uploadPromise = new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
 
-                // Track upload progress (file transfer to server)
-                xhr.upload.addEventListener('progress', (e) => {
-                    if (e.lengthComputable) {
-                        const uploadPercent = Math.round((e.loaded / e.total) * 50);
-                        progressBar.style.width = `${uploadPercent}%`;
-                        if (uploadPercent < 50) {
-                            const mb = (e.loaded / (1024 * 1024)).toFixed(1);
-                            const totalMb = (e.total / (1024 * 1024)).toFixed(1);
-                            progressText.textContent = `يرفع ${mb}/${totalMb} MB — ${totalImages} صورة`;
-                        }
+            // Track upload progress (file transfer to server)
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const uploadPercent = Math.round((e.loaded / e.total) * 50);
+                    progressBar.style.width = `${uploadPercent}%`;
+                    if (uploadPercent < 50) {
+                        const mb = (e.loaded / (1024 * 1024)).toFixed(1);
+                        const totalMb = (e.total / (1024 * 1024)).toFixed(1);
+                        progressText.textContent = `يرفع ${mb}/${totalMb} MB — ${totalImages} صورة`;
                     }
-                });
-
-                // Upload complete — now server is processing
-                xhr.upload.addEventListener('load', () => {
-                    progressBar.style.width = '50%';
-                    progressText.textContent = `يعالج ${totalImages} صورة على GPU...`;
-                    // Animate progress bar slowly during processing
-                    animateProcessing();
-                });
-
-                xhr.addEventListener('load', () => {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        try {
-                            resolve(JSON.parse(xhr.responseText));
-                        } catch (e) {
-                            reject(new Error('Invalid JSON response'));
-                        }
-                    } else {
-                        reject(new Error(`Server error: ${xhr.status}`));
-                    }
-                });
-
-                xhr.addEventListener('error', () => reject(new Error('Network error')));
-                xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
-
-                xhr.open('POST', '/api/remove-bg');
-                xhr.send(formData);
+                }
             });
 
-            // Processing complete
-            progressBar.style.width = '100%';
-            stopProcessingAnimation();
+            // Upload complete — now server is processing
+            xhr.upload.addEventListener('load', () => {
+                progressBar.style.width = '50%';
+                progressText.textContent = `يعالج ${totalImages} صورة على GPU...`;
+                // Animate progress bar slowly during processing
+                animateProcessing();
+            });
 
-            if (result.success && result.results) {
-                result.results.forEach(r => createResultCard(r));
-                const elapsed = result.processing_time
-                    ? ` (${result.processing_time})`
-                    : '';
-                progressText.textContent = `انتهت المعالجة — ${result.results.length} صورة${elapsed}`;
-                showToast(`تمت معالجة ${result.results.length} صورة${elapsed}`);
-            } else {
-                progressText.textContent = 'فشلت المعالجة';
-                showToast(result.error || 'فشلت المعالجة', 'error');
-            }
-        } catch (error) {
-            console.error('Batch upload error:', error);
-            progressBar.style.width = '100%';
-            stopProcessingAnimation();
-            progressText.textContent = 'حدث خطأ';
-            showToast('خطأ في معالجة الصور', 'error');
-        }
+            xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        resolve(JSON.parse(xhr.responseText));
+                    } catch (e) {
+                        reject(new Error('Invalid JSON response'));
+                    }
+                } else {
+                    reject(new Error(`Server error: ${xhr.status}`));
+                }
+            });
 
-        setTimeout(() => {
-            progressSection.style.display = 'none';
-        }, 1500);
+            xhr.addEventListener('error', () => reject(new Error('Network error')));
+            xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
 
-        // Reset file input so the same files can be re-uploaded
-        fileInput.value = '';
+            xhr.open('POST', '/api/remove-bg');
+            xhr.send(formData);
+        });
+
+        uploadPromise
+            .then(result => {
+                // Processing complete
+                progressBar.style.width = '100%';
+                stopProcessingAnimation();
+
+                if (result.success && result.results) {
+                    result.results.forEach(r => createResultCard(r));
+                    const elapsed = result.processing_time
+                        ? ` (${result.processing_time})`
+                        : '';
+                    progressText.textContent = `انتهت المعالجة — ${result.results.length} صورة${elapsed}`;
+                    showToast(`تمت معالجة ${result.results.length} صورة${elapsed}`);
+                } else {
+                    progressText.textContent = 'فشلت المعالجة';
+                    showToast(result.error || 'فشلت المعالجة', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Batch upload error:', error);
+                progressBar.style.width = '100%';
+                stopProcessingAnimation();
+                progressText.textContent = 'حدث خطأ';
+                showToast('خطأ في معالجة الصور', 'error');
+            })
+            .then(() => {
+                setTimeout(() => {
+                    progressSection.style.display = 'none';
+                }, 1500);
+
+                // Reset file input so the same files can be re-uploaded
+                fileInput.value = '';
+            });
     }
 
     // Smoothly animate progress bar during GPU processing
@@ -169,12 +171,12 @@ document.addEventListener('DOMContentLoaded', () => {
             card.style.transform = 'scale(0.95)';
             card.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
             setTimeout(() => {
-                card.remove();
+                if (card.parentNode) card.parentNode.removeChild(card);
                 checkEmptyGrid();
             }, 250);
         });
 
-        resultsGrid.prepend(card);
+        resultsGrid.insertBefore(card, resultsGrid.firstChild);
     }
 
     function checkEmptyGrid() {
@@ -183,63 +185,70 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    clearAllBtn.addEventListener('click', async () => {
+    clearAllBtn.addEventListener('click', () => {
         if (confirm('سيتم حذف جميع الصور المعالجة نهائياً. متأكد؟')) {
-            try {
-                const response = await fetch('/api/delete-all', { method: 'POST' });
-                const data = await response.json();
-
-                if (data.success) {
-                    resultsGrid.innerHTML = '';
-                    resultsHeader.style.display = 'none';
-                    showToast(`تم حذف ${data.count} صورة`);
-                } else {
-                    showToast('فشل حذف الصور', 'error');
-                }
-            } catch (error) {
-                console.error(error);
-                showToast('خطأ في الاتصال', 'error');
-            }
+            fetch('/api/delete-all', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        resultsGrid.innerHTML = '';
+                        resultsHeader.style.display = 'none';
+                        showToast(`تم حذف ${data.count} صورة`);
+                    } else {
+                        showToast('فشل حذف الصور', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error(error);
+                    showToast('خطأ في الاتصال', 'error');
+                });
         }
     });
 
-    downloadAllBtn.addEventListener('click', async () => {
+    downloadAllBtn.addEventListener('click', () => {
         const cards = document.querySelectorAll('.result-card');
         if (cards.length === 0) return;
 
         downloadAllBtn.disabled = true;
         downloadAllBtn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block"></div> جاري الضغط...';
 
-        const filenames = Array.from(cards).map(card => card.dataset.filename);
+        const filenames = Array.prototype.slice.call(cards).map(card => card.dataset.filename);
 
-        try {
-            const response = await fetch('/api/zip', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filenames })
-            });
+        const cleanup = () => {
+            downloadAllBtn.disabled = false;
+            downloadAllBtn.innerHTML = '<i class="ph ph-file-archive"></i> تحميل الكل';
+        };
 
+        fetch('/api/zip', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filenames })
+        })
+        .then(response => {
             if (response.ok) {
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `rmbg_batch_${new Date().getTime()}.zip`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                a.remove();
-                showToast('بدأ تحميل الملف المضغوط');
+                return response.blob().then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `rmbg_batch_${new Date().getTime()}.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    a.remove();
+                    showToast('بدأ تحميل الملف المضغوط');
+                });
             } else {
                 showToast('فشل إنشاء الملف المضغوط', 'error');
             }
-        } catch (error) {
+        })
+        .then(() => {
+            cleanup();
+        })
+        .catch(error => {
             console.error(error);
             showToast('خطأ في الاتصال', 'error');
-        } finally {
-            downloadAllBtn.disabled = false;
-            downloadAllBtn.innerHTML = '<i class="ph ph-file-archive"></i> تحميل الكل';
-        }
+            cleanup();
+        });
     });
 
     function showToast(message, type = 'success') {
