@@ -332,8 +332,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         try {
             const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
-                .setMimeTypes('image/jpeg,image/png,image/gif,image/webp')
-                .setSelectFolderEnabled(false);
+                .setMimeTypes('image/jpeg,image/png,image/gif,image/webp,application/vnd.google-apps.folder')
+                .setSelectFolderEnabled(true);
 
             const picker = new google.picker.PickerBuilder()
                 .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
@@ -353,60 +353,89 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.action === google.picker.Action.PICKED) {
             const documents = data[google.picker.Response.DOCUMENTS];
             if (documents && documents.length > 0) {
-                showToast('جاري تنزيل الملفات من Google Drive...');
-                downloadDriveFiles(documents);
+                showToast('جاري إرسال الطلب للخادم لمعالجة الصور من Google Drive...');
+                processDriveFilesOnServer(documents);
             }
         }
     }
 
-    function downloadDriveFiles(documents) {
+    function processDriveFilesOnServer(documents) {
         progressSection.style.display = 'flex';
         progressBar.style.width = '0%';
-        progressText.textContent = `جاري جلب الملفات من Google Drive...`;
+        progressText.textContent = `جاري استيراد ومعالجة ملفات Google Drive...`;
 
-        const fetchPromises = [];
+        const files = [];
+        const folders = [];
 
         documents.forEach((doc) => {
-            const fileId = doc[google.picker.Document.ID];
+            const id = doc[google.picker.Document.ID];
             const name = doc[google.picker.Document.NAME];
             const mimeType = doc[google.picker.Document.MIME_TYPE];
 
-            const p = fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`
-                }
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Failed to download ${name}`);
-                }
-                return response.blob();
-            })
-            .then(blob => {
-                return new File([blob], name, { type: mimeType });
-            })
-            .catch(error => {
-                console.error(error);
-                showToast(`خطأ في تنزيل ${name} من Google Drive`, 'error');
-                return null;
-            });
-
-            fetchPromises.push(p);
+            if (mimeType === 'application/vnd.google-apps.folder') {
+                folders.push({ id, name });
+            } else {
+                files.push({ id, name, mimeType });
+            }
         });
 
-        Promise.all(fetchPromises)
-            .then(files => {
-                const validFiles = files.filter(f => f !== null);
-                if (validFiles.length > 0) {
-                    handleUpload(validFiles);
+        const requestBody = {
+            accessToken: accessToken,
+            files: files,
+            folders: folders
+        };
+
+        const processingPromise = new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+
+            xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        resolve(JSON.parse(xhr.responseText));
+                    } catch (e) {
+                        reject(new Error('Invalid JSON response'));
+                    }
                 } else {
-                    progressSection.style.display = 'none';
+                    reject(new Error(`Server error: ${xhr.status}`));
+                }
+            });
+
+            xhr.addEventListener('error', () => reject(new Error('Network error')));
+            xhr.addEventListener('abort', () => reject(new Error('Processing aborted')));
+
+            xhr.open('POST', '/api/remove-bg-drive');
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.send(JSON.stringify(requestBody));
+        });
+
+        animateProcessing();
+
+        processingPromise
+            .then(result => {
+                progressBar.style.width = '100%';
+                stopProcessingAnimation();
+
+                if (result.success && result.results) {
+                    result.results.forEach(r => createResultCard(r));
+                    const elapsed = result.processing_time ? ` (${result.processing_time})` : '';
+                    progressText.textContent = `انتهت المعالجة — تم استيراد ${result.results.length} صورة${elapsed}`;
+                    showToast(`تم استيراد ومعالجة ${result.results.length} صورة من Google Drive`);
+                } else {
+                    progressText.textContent = 'فشلت المعالجة';
+                    showToast(result.error || 'فشلت المعالجة', 'error');
                 }
             })
-            .catch(err => {
-                console.error(err);
-                progressSection.style.display = 'none';
-                showToast('حدث خطأ في تحميل ملفات Google Drive', 'error');
+            .catch(error => {
+                console.error('Drive processing error:', error);
+                progressBar.style.width = '100%';
+                stopProcessingAnimation();
+                progressText.textContent = 'حدث خطأ';
+                showToast('خطأ في معالجة صور Google Drive', 'error');
+            })
+            .then(() => {
+                setTimeout(() => {
+                    progressSection.style.display = 'none';
+                }, 1500);
             });
     }
 

@@ -523,6 +523,150 @@ def api_remove_bg():
 
         return jsonify({'success': True, 'results': results})
 
+@app.route('/api/remove-bg-drive', methods=['POST'])
+def api_remove_bg_drive():
+    from urllib.parse import quote
+    import urllib.request
+    import json
+
+    data = request.get_json()
+    if not data or 'accessToken' not in data:
+        return jsonify({'error': 'No access token provided'}), 400
+        
+    access_token = data['accessToken']
+    files_to_download = []
+
+    # Add directly selected files
+    if 'files' in data:
+        for f in data['files']:
+            files_to_download.append({
+                'id': f['id'],
+                'name': f['name'],
+                'mimeType': f.get('mimeType', 'image/png')
+            })
+
+    # Query folder files and add them
+    if 'folders' in data:
+        for folder in data['folders']:
+            folder_id = folder['id']
+            folder_name = folder['name']
+            try:
+                # Query Drive API for nested images inside this folder
+                query = quote(f"'{folder_id}' in parents and trashed = false and mimeType contains 'image/'")
+                url = f"https://www.googleapis.com/drive/v3/files?q={query}&fields=files(id,name,mimeType)"
+                req = urllib.request.Request(url, headers={'Authorization': f'Bearer {access_token}'})
+                with urllib.request.urlopen(req) as response:
+                    res_data = json.loads(response.read().decode('utf-8'))
+                    for f in res_data.get('files', []):
+                        files_to_download.append({
+                            'id': f['id'],
+                            'name': f['name'],
+                            'mimeType': f.get('mimeType', 'image/png')
+                        })
+            except Exception as e:
+                print(f"Error listing folder {folder_name} ({folder_id}): {e}")
+
+    if not files_to_download:
+        return jsonify({'error': 'No files found to process'}), 400
+
+    # Downloader helper
+    valid_images = []
+    file_info = []
+
+    for file_meta in files_to_download:
+        file_id = file_meta['id']
+        filename = file_meta['name']
+        try:
+            # Download file from Drive
+            url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+            req = urllib.request.Request(url, headers={'Authorization': f'Bearer {access_token}'})
+            with urllib.request.urlopen(req) as response:
+                image_bytes = response.read()
+                image = Image.open(BytesIO(image_bytes))
+                image = ImageOps.exif_transpose(image)
+                image = image.convert('RGB')
+                original_base = os.path.splitext(secure_filename(filename))[0]
+                if not original_base:
+                    original_base = "drive_image"
+                valid_images.append(image)
+                file_info.append({
+                    'original_base': original_base,
+                    'original_name': filename
+                })
+        except Exception as e:
+            print(f"Error downloading Google Drive file {filename} ({file_id}): {e}")
+
+    if not valid_images:
+        return jsonify({'error': 'Failed to download any images from Google Drive'}), 400
+
+    # Process background removal using the existing CPU/GPU pipeline
+    if USE_GPU:
+        try:
+            t_start = time.time()
+            processed_images = remove_background_batch(valid_images)
+            if birefnet is not None:
+                torch.cuda.synchronize()
+            t_inference = time.time() - t_start
+        except Exception as e:
+            print(f"Batch inference error: {e}")
+            if birefnet is not None:
+                torch.cuda.empty_cache()
+            return jsonify({'error': 'Inference failed'}), 500
+
+        save_futures = []
+        results = []
+        for i, processed in enumerate(processed_images):
+            original_base = file_info[i]['original_base']
+            filename = f"{original_base}.png"
+            counter = 1
+            while os.path.exists(os.path.join(OUTPUT_FOLDER, filename)):
+                filename = f"{original_base}_{counter}.png"
+                counter += 1
+            output_path = os.path.join(OUTPUT_FOLDER, filename)
+            save_futures.append(save_executor.submit(save_result_async, processed, output_path))
+            results.append({
+                'filename': filename,
+                'url': f'/output/{filename}',
+                'original_name': file_info[i]['original_name']
+            })
+
+        for future in save_futures:
+            future.result()
+
+        total_time = time.time() - t_start
+        time_str = f"{total_time:.1f}s"
+        print(f"Total request (Google Drive): {len(valid_images)} images processed in {total_time:.2f}s")
+        return jsonify({'success': True, 'results': results, 'processing_time': time_str})
+
+    else:
+        results = []
+        t_start = time.time()
+        for i, image in enumerate(valid_images):
+            try:
+                processed = remove_background(image)
+                original_base = file_info[i]['original_base']
+                filename = f"{original_base}.png"
+                counter = 1
+                while os.path.exists(os.path.join(OUTPUT_FOLDER, filename)):
+                    filename = f"{original_base}_{counter}.png"
+                    counter += 1
+
+                output_path = os.path.join(OUTPUT_FOLDER, filename)
+                processed.save(output_path, 'PNG')
+
+                results.append({
+                    'filename': filename,
+                    'url': f'/output/{filename}',
+                    'original_name': file_info[i]['original_name']
+                })
+            except Exception as e:
+                print(f"Error processing {file_info[i]['original_name']}: {e}")
+
+        total_time = time.time() - t_start
+        time_str = f"{total_time:.1f}s"
+        print(f"Total request (Google Drive CPU): {len(valid_images)} images processed in {total_time:.2f}s")
+        return jsonify({'success': True, 'results': results, 'processing_time': time_str})
+
 @app.route('/api/zip', methods=['POST'])
 def api_download_zip():
     data = request.get_json()
