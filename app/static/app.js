@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultsHeader = document.getElementById('results-header');
     const downloadAllBtn = document.getElementById('download-all-btn');
     const clearAllBtn = document.getElementById('clear-all-btn');
+    const googleDriveBtn = document.getElementById('google-drive-btn');
 
     uploadZone.addEventListener('click', () => fileInput.click());
     uploadZone.addEventListener('dragover', (e) => {
@@ -250,6 +251,164 @@ document.addEventListener('DOMContentLoaded', () => {
             cleanup();
         });
     });
+
+    // --- Google Drive Integration ---
+    let accessToken = null;
+    let pickerApiLoaded = false;
+
+    // Load Google Picker API on start if gapi is ready
+    if (window.gapi) {
+        gapi.load('picker', {
+            callback: () => { pickerApiLoaded = true; }
+        });
+    } else {
+        const checkGapiInterval = setInterval(() => {
+            if (window.gapi) {
+                gapi.load('picker', {
+                    callback: () => { pickerApiLoaded = true; }
+                });
+                clearInterval(checkGapiInterval);
+            }
+        }, 500);
+        setTimeout(() => clearInterval(checkGapiInterval), 10000);
+    }
+
+    googleDriveBtn.addEventListener('click', () => {
+        if (!window.GOOGLE_CLIENT_ID || !window.GOOGLE_API_KEY) {
+            showToast('الرجاء إعداد GOOGLE_CLIENT_ID و GOOGLE_API_KEY في البيئة لتفعيل رفع ملفات Google Drive', 'error');
+            return;
+        }
+
+        if (!window.google || !window.gapi) {
+            showToast('خطأ في تحميل مكتبات Google. يرجى التحقق من اتصال الإنترنت والمحاولة لاحقاً', 'error');
+            return;
+        }
+
+        if (accessToken) {
+            createPicker();
+        } else {
+            try {
+                const tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: window.GOOGLE_CLIENT_ID,
+                    scope: 'https://www.googleapis.com/auth/drive.readonly',
+                    callback: (tokenResponse) => {
+                        if (tokenResponse && tokenResponse.access_token) {
+                            accessToken = tokenResponse.access_token;
+                            createPicker();
+                        } else {
+                            showToast('فشل الحصول على تصريح الوصول لـ Google Drive', 'error');
+                        }
+                    },
+                    error_callback: (err) => {
+                        console.error('GIS Error:', err);
+                        showToast('حدث خطأ أثناء المصادقة مع Google', 'error');
+                    }
+                });
+                tokenClient.requestAccessToken({ prompt: 'consent' });
+            } catch (err) {
+                console.error(err);
+                showToast('خطأ في تهيئة الاتصال مع Google', 'error');
+            }
+        }
+    });
+
+    function createPicker() {
+        if (!pickerApiLoaded && window.gapi) {
+            gapi.load('picker', {
+                callback: () => {
+                    pickerApiLoaded = true;
+                    openPicker();
+                }
+            });
+        } else {
+            openPicker();
+        }
+    }
+
+    function openPicker() {
+        if (!pickerApiLoaded) {
+            showToast('جاري تحميل مكتبة Google Picker، يرجى المحاولة بعد قليل', 'error');
+            return;
+        }
+        try {
+            const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+                .setMimeTypes('image/jpeg,image/png,image/gif,image/webp')
+                .setSelectFolderEnabled(false);
+
+            const picker = new google.picker.PickerBuilder()
+                .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+                .addView(view)
+                .setOAuthToken(accessToken)
+                .setDeveloperKey(window.GOOGLE_API_KEY)
+                .setCallback(pickerCallback)
+                .build();
+            picker.setVisible(true);
+        } catch (err) {
+            console.error(err);
+            showToast('فشل إنشاء نافذة اختيار ملفات Google Drive', 'error');
+        }
+    }
+
+    function pickerCallback(data) {
+        if (data.action === google.picker.Action.PICKED) {
+            const documents = data[google.picker.Response.DOCUMENTS];
+            if (documents && documents.length > 0) {
+                showToast('جاري تنزيل الملفات من Google Drive...');
+                downloadDriveFiles(documents);
+            }
+        }
+    }
+
+    function downloadDriveFiles(documents) {
+        progressSection.style.display = 'flex';
+        progressBar.style.width = '0%';
+        progressText.textContent = `جاري جلب الملفات من Google Drive...`;
+
+        const fetchPromises = [];
+
+        documents.forEach((doc) => {
+            const fileId = doc[google.picker.Document.ID];
+            const name = doc[google.picker.Document.NAME];
+            const mimeType = doc[google.picker.Document.MIME_TYPE];
+
+            const p = fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Failed to download ${name}`);
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                return new File([blob], name, { type: mimeType });
+            })
+            .catch(error => {
+                console.error(error);
+                showToast(`خطأ في تنزيل ${name} من Google Drive`, 'error');
+                return null;
+            });
+
+            fetchPromises.push(p);
+        });
+
+        Promise.all(fetchPromises)
+            .then(files => {
+                const validFiles = files.filter(f => f !== null);
+                if (validFiles.length > 0) {
+                    handleUpload(validFiles);
+                } else {
+                    progressSection.style.display = 'none';
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                progressSection.style.display = 'none';
+                showToast('حدث خطأ في تحميل ملفات Google Drive', 'error');
+            });
+    }
 
     function showToast(message, type = 'success') {
         const toast = document.getElementById('toast');

@@ -272,6 +272,33 @@ body {
     border-color: rgba(212, 56, 56, 0.3);
 }
 
+.drive-integration {
+    display: flex;
+    justify-content: center;
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.btn-drive {
+    background: var(--ledge);
+    color: var(--text-bright);
+    border: 1px solid var(--shore);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    font-weight: 500;
+}
+
+.btn-drive:hover {
+    background: var(--workshop);
+    border-color: var(--crescent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px var(--crescent-soft);
+}
+
+.btn-drive i {
+    font-size: 1.15rem;
+    color: var(--crescent);
+}
+
 .results-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

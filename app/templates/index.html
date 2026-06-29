@@ -7,6 +7,12 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='phosphor/style.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Lalezar&family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script>
+        window.GOOGLE_CLIENT_ID = "{{ google_client_id }}";
+        window.GOOGLE_API_KEY = "{{ google_api_key }}";
+    </script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
 </head>
 <body>
     <div class="app-container">
@@ -31,6 +37,12 @@
                         <p>اسحب وأفلت هنا، أو اضغط لاختيار الملفات</p>
                         <span class="format-badge">JPG · PNG · WEBP — 50 MB حد أقصى</span>
                     </div>
+                </div>
+
+                <div class="drive-integration">
+                    <button id="google-drive-btn" class="btn btn-drive">
+                        <i class="ph ph-google-drive-logo"></i> اختيار من Google Drive
+                    </button>
                 </div>
 
                 <div class="progress-section" id="progress-section" style="display: none;">

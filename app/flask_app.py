@@ -5,6 +5,23 @@ Auto-detects GPU: runs optimized GPU path if CUDA available, CPU path otherwise.
 """
 
 import os
+# Load environment variables from .env file if present in the project root
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_env_path = os.path.join(os.path.dirname(_script_dir), '.env')
+if os.path.exists(_env_path):
+    try:
+        with open(_env_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, val = line.split('=', 1)
+                    key = key.strip()
+                    val = val.strip().strip("'").strip('"')
+                    os.environ[key] = val
+        print("Loaded environment variables from .env file successfully.")
+    except Exception as e:
+        print(f"Warning: Failed to load .env file: {e}")
+
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 import sys
 import uuid
@@ -40,6 +57,16 @@ warnings.filterwarnings('ignore', category=FutureWarning, module='timm')
 warnings.filterwarnings('ignore', category=DeprecationWarning, module='torch.ao.quantization')
 
 USE_GPU = torch.cuda.is_available()
+if USE_GPU:
+    try:
+        # Test CUDA memory allocation and stream creation to check for OS/OOM issues
+        _test_tensor = torch.zeros(1, device='cuda')
+        _test_stream = torch.cuda.Stream()
+        del _test_tensor, _test_stream
+        torch.cuda.empty_cache()
+    except Exception as e:
+        print(f"WARNING: CUDA initialization check failed ({e}). Forcing CPU fallback.")
+        USE_GPU = False
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024 if USE_GPU else 50 * 1024 * 1024
@@ -148,49 +175,56 @@ if USE_GPU:
         birefnet = AutoModelForImageSegmentation.from_pretrained(
             model_source, trust_remote_code=True, torch_dtype=torch.float16
         )
-    except (ValueError, OSError) as e:
-        if model_source != "cocktailpeanut/rm":
-            print(f"WARNING: Failed to load from local source '{model_source}': {e}")
+    except Exception as e:
+        print(f"WARNING: Failed to load from local source '{model_source}': {e}")
+        try:
             print("Falling back to Hugging Face Hub ('cocktailpeanut/rm')...")
             birefnet = AutoModelForImageSegmentation.from_pretrained(
                 "cocktailpeanut/rm", trust_remote_code=True, torch_dtype=torch.float16
             )
-        else:
-            raise e
-    birefnet = birefnet.to(device)
-    birefnet.eval()
+        except Exception as e2:
+            print(f"ERROR: Failed to load model from all sources: {e2}")
+            print("Server will start in MOCK mode (images will be processed without background removal).")
+            birefnet = None
 
     compile_status = "disabled"
-    if USE_TORCH_COMPILE:
-        print("WARNING: torch.compile() enabled. JIT compilation takes 5-15 minutes on first run.")
-        try:
-            birefnet = torch.compile(birefnet, mode=TORCH_COMPILE_MODE)
-            compile_status = f"enabled (mode={TORCH_COMPILE_MODE})"
-        except Exception as e:
-            compile_status = f"failed: {e}"
+    warmup_time = 0.0
+    if birefnet is not None:
+        birefnet = birefnet.to(device)
+        birefnet.eval()
 
-    torch.backends.cuda.enable_flash_sdp(True)
+        if USE_TORCH_COMPILE:
+            print("WARNING: torch.compile() enabled. JIT compilation takes 5-15 minutes on first run.")
+            try:
+                birefnet = torch.compile(birefnet, mode=TORCH_COMPILE_MODE)
+                compile_status = f"enabled (mode={TORCH_COMPILE_MODE})"
+            except Exception as e:
+                compile_status = f"failed: {e}"
 
-    warmup_batch = 1  # Single-image warmup for fastest startup
-    if USE_TORCH_COMPILE and compile_status.startswith("enabled"):
-        print(f"Running warmup inference (batch={warmup_batch}) — includes torch.compile JIT (expect 5-15 min delay)...")
+        torch.backends.cuda.enable_flash_sdp(True)
+
+        warmup_batch = 1  # Single-image warmup for fastest startup
+        if USE_TORCH_COMPILE and compile_status.startswith("enabled"):
+            print(f"Running warmup inference (batch={warmup_batch}) — includes torch.compile JIT (expect 5-15 min delay)...")
+        else:
+            print(f"Running warmup inference (batch={warmup_batch})...")
+        warmup_start = time.time()
+        warmup_tensor = torch.randn(warmup_batch, 3, 1024, 1024, dtype=torch.float16, device=device)
+        with torch.inference_mode():
+            autocast_dtype = torch.float8_e4m3fn if USE_FP8 else torch.float16
+            with torch.autocast(device_type="cuda", dtype=autocast_dtype):
+                _ = birefnet(warmup_tensor)[-1].sigmoid().cpu()
+        del warmup_tensor
+        torch.cuda.synchronize()
+        warmup_time = time.time() - warmup_start
+        print(f"Warmup complete in {warmup_time:.2f}s")
+
+        gpu_mem_allocated = torch.cuda.memory_allocated() / (1024 ** 3)
+        gpu_mem_reserved = torch.cuda.memory_reserved() / (1024 ** 3)
+        print(f"Model loaded on {device} ({gpu_name})")
+        print(f"GPU Memory: {gpu_mem_allocated:.2f} GB allocated, {gpu_mem_reserved:.2f} GB reserved")
     else:
-        print(f"Running warmup inference (batch={warmup_batch})...")
-    warmup_start = time.time()
-    warmup_tensor = torch.randn(warmup_batch, 3, 1024, 1024, dtype=torch.float16, device=device)
-    with torch.inference_mode():
-        autocast_dtype = torch.float8_e4m3fn if USE_FP8 else torch.float16
-        with torch.autocast(device_type="cuda", dtype=autocast_dtype):
-            _ = birefnet(warmup_tensor)[-1].sigmoid().cpu()
-    del warmup_tensor
-    torch.cuda.synchronize()
-    warmup_time = time.time() - warmup_start
-    print(f"Warmup complete in {warmup_time:.2f}s")
-
-    gpu_mem_allocated = torch.cuda.memory_allocated() / (1024 ** 3)
-    gpu_mem_reserved = torch.cuda.memory_reserved() / (1024 ** 3)
-    print(f"Model loaded on {device} ({gpu_name})")
-    print(f"GPU Memory: {gpu_mem_allocated:.2f} GB allocated, {gpu_mem_reserved:.2f} GB reserved")
+        print(f"Model NOT loaded. GPU Server running in MOCK mode on {device} ({gpu_name})")
 
     # CUDA stream for overlapping preprocessing with inference
     preprocess_stream = torch.cuda.Stream()
@@ -230,6 +264,8 @@ if USE_GPU:
         return output_path
 
     def remove_background_single(image):
+        if birefnet is None:
+            return image.convert('RGBA')
         image_size = image.size  # (W, H)
         input_tensor = preprocess_gpu(image)
         autocast_dtype = torch.float8_e4m3fn if USE_FP8 else torch.float16
@@ -249,6 +285,8 @@ if USE_GPU:
         return image
 
     def remove_background_batch(images):
+        if birefnet is None:
+            return [img.convert('RGBA') for img in images]
         if len(images) == 1:
             return [remove_background_single(images[0])]
 
@@ -322,36 +360,44 @@ else:
         birefnet = AutoModelForImageSegmentation.from_pretrained(
             model_source, trust_remote_code=True
         )
-    except (ValueError, OSError) as e:
-        if model_source != "cocktailpeanut/rm":
-            print(f"WARNING: Failed to load from local source '{model_source}': {e}")
+    except Exception as e:
+        print(f"WARNING: Failed to load from local source '{model_source}': {e}")
+        try:
             print("Falling back to Hugging Face Hub ('cocktailpeanut/rm')...")
             birefnet = AutoModelForImageSegmentation.from_pretrained(
                 "cocktailpeanut/rm", trust_remote_code=True
             )
-        else:
-            raise e
-    birefnet = devicetorch.to(torch, birefnet)
-    birefnet.eval()
+        except Exception as e2:
+            print(f"ERROR: Failed to load model from all sources: {e2}")
+            print("Server will start in MOCK mode (images will be processed without background removal).")
+            birefnet = None
 
-    if device_str == 'cpu':
-        print("Applying Dynamic Quantization for CPU speedup...")
-        try:
-            birefnet = torch.quantization.quantize_dynamic(
-                birefnet, {torch.nn.Linear}, dtype=torch.qint8
-            )
-        except Exception as e:
-            print(f"Quantization warning: {e}")
+    if birefnet is not None:
+        birefnet = devicetorch.to(torch, birefnet)
+        birefnet.eval()
 
-    transform_image = transforms.Compose([
-        transforms.Resize((1024, 1024)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-    ])
+        if device_str == 'cpu':
+            print("Applying Dynamic Quantization for CPU speedup...")
+            try:
+                birefnet = torch.quantization.quantize_dynamic(
+                    birefnet, {torch.nn.Linear}, dtype=torch.qint8
+                )
+            except Exception as e:
+                print(f"Quantization warning: {e}")
 
-    print(f"Model loaded on {device}")
+        transform_image = transforms.Compose([
+            transforms.Resize((1024, 1024)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ])
+
+        print(f"Model loaded on {device}")
+    else:
+        print(f"Model NOT loaded. CPU Server running in MOCK mode on {device}")
 
     def remove_background(image):
+        if birefnet is None:
+            return image.convert('RGBA')
         image_size = image.size
         input_images = transform_image(image).unsqueeze(0)
         input_images = devicetorch.to(torch, input_images)
@@ -374,7 +420,11 @@ def generate_filename(prefix="no_bg"):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template(
+        'index.html',
+        google_client_id=os.environ.get('GOOGLE_CLIENT_ID', ''),
+        google_api_key=os.environ.get('GOOGLE_API_KEY', '')
+    )
 
 @app.route('/api/remove-bg', methods=['POST'])
 def api_remove_bg():
